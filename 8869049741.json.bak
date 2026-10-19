@@ -1,0 +1,32 @@
+{
+  "mobile": "8869049741",
+  "user_id": 602413725,
+  "phone": "+918869049741",
+  "xo": "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakUzT1RJMk1EYzFNamNzSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5cGJuTjBZVzVqWlY5cFpDSTZJamRrWlRaak1XRm1PVFUzWWpGa05qazROV1U1TXpCaU1UWmtaV1JrWWpreUlpd2lhSFIwY0hNNkx5OXRaV1Z6YUc4dVkyOXRMM1Z6WlhKZmFXUWlPaUkyTURJME1UTTNNalVpTENKcFlYUWlPakUzT1RJME16UTNNamQ5LkZ6S3VwTVZ3TnNvcjZFd09HV3JTSnkyOWkyVkFHYnZ4NzVVTE1pRXBmVk0iLCJ4byI6ImEzNjk1ZDlhMGM0MjQwNjE5YTI1ZDE1NTYxMjRhZDM5In0=",
+  "ox": "AVmbXoCAw8-vX8Ar7wAldsl7yReQu3wl3YhfJygzNUAC5zMxoiHpa5mz2X5kNqa1bm9kFsS3JRWCDn0kV35oUh1Qn2V2vYkVUPwh2zyLTvk5pxR3ldA7V0o7MCfteQrSY2X-lA",
+  "instance_id": "7de6c1af957b1d6985e930b16deddb92",
+  "gaid": "3e46198c-bed4-4938-baa5-8f50e1b64765",
+  "identity": {
+    "instance_id": "7de6c1af957b1d6985e930b16deddb92",
+    "gaid": "3e46198c-bed4-4938-baa5-8f50e1b64765",
+    "android_id": "a43194698daf410c",
+    "media_id": "2a8d40edd07cd5015190211c339de3864cd159d6a3905ebc5ab7080babd6c473",
+    "app_session_id": "27384a7e-f99a-4602-b12e-9cf8c6cd01bb",
+    "make": "Samsung",
+    "model": "Galaxy A54",
+    "build": "UP1A.231005.007",
+    "android": "14",
+    "dalvik_ua": "Dalvik/2.1.0 (Linux; U; Android 14; Galaxy A54 Build/UP1A.231005.007) otplesssdk",
+    "connection_type": "MOBILE",
+    "carrier": "Jio",
+    "screen_width": 1080,
+    "screen_height": 2340,
+    "screen_dpi": 450,
+    "fcm_token": "yGxcjHiBo4r:APA91bmMD1ECKGozi9Wm7eN6U4_pEuR1NU5vNO3OayZ_ZoQYl4QWlq9GxiVHc-osmQkH88ROIsAzutCuIW0ONSXAEG3DN3m53VC7gi3kaw6d4G7QGV18eRmwbzpVfpY0fdYVOYsD_kKB",
+    "xff": "122.161.2.24",
+    "anon_xo": "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakU1TkRnNU5qUXdNRGdzSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5aGJtOXVlVzF2ZFhOZmRYTmxjbDlwWkNJNklqYzNPVEV6WldJNUxUTTVOamt0TkdWbE9TMDVNVFptTFdGaU9UTmhaRE5oTkRFek5TSXNJbWgwZEhCek9pOHZiV1ZsYzJodkxtTnZiUzlwYm5OMFlXNWpaVjlwWkNJNklqZGtaVFpqTVdGbU9UVTNZakZrTmprNE5XVTVNekJpTVRaa1pXUmtZamt5SWl3aWFXRjBJam94TnpreE1qZzBNREE0ZlEuNkZXWmQyeU84Q2FZU1k0UGMwOWNoaTcyc0s4NjZqYVhDUlIzOFduaU5zUSIsInhvIjoiIn0=",
+    "_referral_done": true,
+    "gender": "Female",
+    "age_group": "19-24"
+  }
+}

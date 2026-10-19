@@ -1,0 +1,43 @@
+# ==============================================================================
+# Git Ignore Configuration for Meesho E2E Engine
+# STRICT PRIVACY: Prevents all account JSONs, sessions, credentials, and secrets
+# from being committed to Git.
+# ==============================================================================
+
+# Account credentials and session files (JSON / JSONL)
+*.json
+*.jsonl
+*7977748514*
+
+# Environment and secret tokens
+.env
+.env.*
+*.env
+
+# Output reports and artifact directories
+classified_accounts/
+classified_fod/
+assignment_outputs/
+refreshed_accounts/
+logs/
+*.log
+scratch/
+
+# Python compiled bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+

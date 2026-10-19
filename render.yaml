@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: meesho-e2e
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn web_ui:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.12
+      - key: PORT
+        value: 10000
+
