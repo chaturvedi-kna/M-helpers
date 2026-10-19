@@ -746,17 +746,36 @@ HTML_TEMPLATE = """
       text = text.trim();
       if (!text) return [];
       try {
-        const parsed = JSON.parse(text);
+        let parsed = JSON.parse(text);
+        // Unpack wrapper objects containing account arrays
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          if (parsed.summary && typeof parsed.summary === 'object') {
+            for (const k of ['refreshed', 'accounts', 'records', 'data', 'scanned', 'fresh_accounts', 'used_accounts']) {
+              if (Array.isArray(parsed.summary[k]) && parsed.summary[k].length > 0 && typeof parsed.summary[k][0] === 'object') {
+                parsed = parsed.summary[k];
+                break;
+              }
+            }
+          }
+          if (!Array.isArray(parsed)) {
+            for (const k of ['refreshed', 'accounts', 'records', 'data', 'assignments', 'items', 'detailed_results']) {
+              if (Array.isArray(parsed[k]) && parsed[k].length > 0 && typeof parsed[k][0] === 'object') {
+                parsed = parsed[k];
+                break;
+              }
+            }
+          }
+        }
         if (Array.isArray(parsed)) {
           return parsed.map((item, idx) => {
             if (typeof item === 'object' && item !== null) {
-              item.source_reference = `${sourceRef}[${idx}]`;
+              item.source_reference = item.source_reference || `${sourceRef}[${idx}]`;
               return item;
             }
             return null;
           }).filter(Boolean);
         } else if (typeof parsed === 'object' && parsed !== null) {
-          parsed.source_reference = sourceRef;
+          parsed.source_reference = parsed.source_reference || sourceRef;
           return [parsed];
         }
       } catch (e) {
@@ -1115,9 +1134,37 @@ HTML_TEMPLATE = """
               <div class="p-2.5 bg-slate-900 rounded border border-slate-800">Duplicates: <strong class="text-amber-400">${rep.duplicates_count}</strong></div>
               <div class="p-2.5 bg-slate-900 rounded border border-slate-800 text-emerald-400">Live API: <strong>VERIFIED</strong></div>
             </div>
-            <div class="text-xs text-slate-300">
+            <div class="text-xs text-slate-300 mb-3">
               <strong>Tiers Found:</strong> ${Object.entries(rep.tier_counts || {}).map(([k, v]) => `<span class="bg-amber-950/70 border border-amber-800 text-amber-300 px-2 py-0.5 rounded mr-1">${k}: ${v}</span>`).join(' ')}
             </div>
+            ${data.records && data.records.length > 0 ? `
+              <div class="mt-3 overflow-x-auto max-h-96 border border-slate-800 rounded-lg">
+                <table class="w-full text-xs text-left text-slate-300">
+                  <thead class="text-[11px] uppercase bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+                    <tr>
+                      <th class="px-3 py-2">Account / Mobile</th>
+                      <th class="px-3 py-2">Advertised Tier</th>
+                      <th class="px-3 py-2">Offer Bucket</th>
+                      <th class="px-3 py-2">Amount</th>
+                      <th class="px-3 py-2">Offer Text</th>
+                      <th class="px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800 font-mono">
+                    ${data.records.map(r => `
+                      <tr class="hover:bg-slate-900/50">
+                        <td class="px-3 py-2 font-semibold text-slate-200">${r.mobile || r.account_id || r.source_reference}</td>
+                        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">${r.advertised_tier}</span></td>
+                        <td class="px-3 py-2 font-bold text-amber-400">${r.offer_bucket || 'N/A'}</td>
+                        <td class="px-3 py-2 font-bold text-emerald-400">${r.advertised_amount ? '₹' + r.advertised_amount : '₹0'}</td>
+                        <td class="px-3 py-2 text-slate-300">${r.raw_offer_text || '-'}</td>
+                        <td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-[10px] ${r.eligibility_status === 'ELIGIBLE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-400'}">${r.eligibility_status}</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
           </div>
         `;
       } catch (err) {
@@ -1184,6 +1231,30 @@ HTML_TEMPLATE = """
               <div class="text-2xl font-bold text-amber-400 mt-1">${s.unknown_count}</div>
             </div>
           </div>
+          ${data.detailed_results && data.detailed_results.length > 0 ? `
+            <div class="mb-4 overflow-x-auto max-h-96 border border-slate-800 rounded-lg">
+              <table class="w-full text-xs text-left text-slate-300">
+                <thead class="text-[11px] uppercase bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+                  <tr>
+                    <th class="px-3 py-2">Account / Mobile</th>
+                    <th class="px-3 py-2">Classification</th>
+                    <th class="px-3 py-2">Order Count</th>
+                    <th class="px-3 py-2">Reason / Proof</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800 font-mono">
+                  ${data.detailed_results.map(r => `
+                    <tr class="hover:bg-slate-900/50">
+                      <td class="px-3 py-2 font-semibold text-slate-200">${r.mobile || r.account_id || r.source_file}</td>
+                      <td class="px-3 py-2"><span class="px-2 py-0.5 rounded ${r.classification === 'fresh' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : (r.classification === 'used' ? 'bg-blue-950 text-blue-400 border border-blue-800' : 'bg-amber-950 text-amber-300 border border-amber-800')}">${r.classification.toUpperCase()}</span></td>
+                      <td class="px-3 py-2 font-bold ${r.order_count > 0 ? 'text-blue-400' : 'text-emerald-400'}">${r.order_count !== null && r.order_count !== undefined ? r.order_count : '-'}</td>
+                      <td class="px-3 py-2 text-slate-300">${r.reason || '-'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-300">
             <span>Verified with live Meesho order history API (/api/3.0/user/orders)</span>
             <button onclick="downloadJsonData(window.lastAccSummary, 'classified_accounts.json')" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 transition">
@@ -1260,14 +1331,22 @@ HTML_TEMPLATE = """
           <div class="space-y-2 max-h-96 overflow-y-auto">
         `;
         rep.results.forEach(res => {
+          let badgeClass = 'bg-purple-950 text-purple-400 border border-purple-800';
+          if (res.status === 'SUCCESS') badgeClass = 'bg-emerald-950 text-emerald-400 border border-emerald-800';
+          else if (res.status === 'FAILED') badgeClass = 'bg-rose-950 text-rose-400 border border-rose-800';
+          else if (res.status && res.status.includes('SKIPPED')) badgeClass = 'bg-amber-950 text-amber-300 border border-amber-800';
+
           html += `
-            <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between">
-              <div>
-                <span class="font-mono text-sm text-purple-400 font-semibold">${res.account_id}</span>
-                <span class="text-xs text-slate-400 ml-2">&bull; Pincode: ${res.assigned_address_pincode}</span>
-                <span class="text-xs text-slate-400 ml-2">&bull; ${res.assigned_products_count} product(s)</span>
+            <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="font-mono text-sm text-purple-400 font-semibold">${res.account_id}</span>
+                  <span class="text-xs text-slate-400 ml-2">&bull; Pincode: ${res.assigned_address_pincode || 'N/A'}</span>
+                  <span class="text-xs text-slate-400 ml-2">&bull; ${res.assigned_products_count} product(s)</span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-xs ${badgeClass}">${res.status}</span>
               </div>
-              <span class="px-2 py-0.5 rounded text-xs bg-purple-950 text-purple-400 border border-purple-800">${res.status}</span>
+              ${res.error ? `<div class="text-xs text-rose-400 mt-1 font-mono"><i class="fa-solid fa-circle-exclamation mr-1"></i>${res.error}</div>` : ''}
             </div>
           `;
         });
@@ -1547,6 +1626,7 @@ def api_classify_fod():
         return jsonify({
             "success": True,
             "summary": summary.to_dict()["summary"],
+            "records": summary.to_dict().get("records", []),
             "format_type": format_type
         })
     except Exception as e:
@@ -1578,7 +1658,8 @@ def api_classify_accounts():
         print(f"[✓] /api/classify-accounts: Completed {summary.total_scanned} accounts (Fresh: {summary.fresh_count}, Used: {summary.used_count}, Unknown: {summary.unknown_count})", flush=True)
         return jsonify({
             "success": True,
-            "summary": summary.to_dict()["summary"]
+            "summary": summary.to_dict()["summary"],
+            "detailed_results": [r.to_dict() for r in (summary.fresh_accounts + summary.used_accounts + summary.unknown_accounts)]
         })
     except Exception as e:
         logger.exception(f"Account classification failed: {e}")

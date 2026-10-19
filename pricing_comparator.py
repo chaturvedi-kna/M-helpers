@@ -102,6 +102,7 @@ class PriceBreakdown:
     status: ComparisonStatus
     city: str = ""
     state: str = ""
+    zone: str = ""
     displayed_product_price: float = 0.0
     delivery_charges: float = 0.0
     eligible_discounts: float = 0.0
@@ -450,13 +451,22 @@ class ProductPricingComparator:
         except Exception as e:
             # Fallback to fast shipping charges + base product price if full cart location failed
             logger.warning(f"Full cart evaluation failed on pin {pincode}: {e}. Falling back to shipping quote.")
+            fallback_city = ""
+            fallback_state = ""
+            fallback_zone = ""
+            if str(pincode) in ALL_INDIA_PIN_MAP:
+                fallback_city = ALL_INDIA_PIN_MAP[str(pincode)].get("city", "")
+                fallback_state = ALL_INDIA_PIN_MAP[str(pincode)].get("state", "")
+                fallback_zone = ALL_INDIA_PIN_MAP[str(pincode)].get("zone", "")
+
             final_payable = base_price + fast_charges
             return PriceBreakdown(
                 product_id=product_id,
                 pincode=pincode,
                 status=ComparisonStatus.VERIFIED_AVAILABLE,
-                city=loc_res.get("city", "") if "loc_res" in locals() else "",
-                state=loc_res.get("state", "") if "loc_res" in locals() else "",
+                city=fallback_city,
+                state=fallback_state,
+                zone=fallback_zone,
                 displayed_product_price=round(base_price, 2),
                 delivery_charges=round(fast_charges, 2),
                 eligible_discounts=0.0,

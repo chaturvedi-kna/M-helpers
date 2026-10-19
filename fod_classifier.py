@@ -78,6 +78,9 @@ class FODClassificationSummary:
                 "tier_counts": self.tier_counts,
                 "eligibility_counts": self.eligibility_counts
             },
+            "records": [
+                r.to_dict() for records in self.records_by_tier.values() for r in records
+            ],
             "invalid_records": self.invalid_records
         }
 
@@ -359,7 +362,10 @@ def fetch_live_fod(
     xo = str(acc.get("xo") or "")
 
     # Build headers - Meesho /api/1.0/anonymous/fod-personalisation strictly requires anonymous context
-    anon_xo = identity.get("anon_xo") or xo or "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakU1TkRrek5ERTJNek1zSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5aGJtOXVlVzF2ZFhOZmRYTmxjbDlwWkNJNkltWXdPRFk1WXpZeExUUTJaRGt0TkROak1DMWlOek0xTFdZeFpESm1aREF4WlRReU15SXNJbWgwZEhCek9pOHZiV1ZsYzJodkxtTnZiUzlwYm5OMFlXNWpaVjlwWkNJNklqSXdZVFF5T1dFNVl6VmxOalF4T1dWaE1EQmlOekk0T0RrM01XSm1PVEkySWl3aWFXRjBJam94TnpreE5qWXhOak16ZlEueDB6ZDZDT0pkVU1tTk5XeFVib2RKcHMyNUJ5cDZFcXVKSTNaTVBpbkpoQSIsInhvIjoiIn0="
+    anon_xo = identity.get("anon_xo") or acc.get("anon_xo")
+    if not anon_xo:
+        anon_xo = "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakU1TkRrek5ERTJNek1zSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5aGJtOXVlVzF2ZFhOZmRYTmxjbDlwWkNJNkltWXdPRFk1WXpZeExUUTJaRGt0TkROak1DMWlOek0xTFdZeFpESm1aREF4WlRReU15SXNJbWgwZEhCek9pOHZiV1ZsYzJodkxtTnZiUzlwYm5OMFlXNWpaVjlwWkNJNklqSXdZVFF5T1dFNVl6VmxOalF4T1dWaE1EQmlOekk0T0RrM01XSm1PVEkySWl3aWFXRjBJam94TnpreE5qWXhOak16ZlEueDB6ZDZDT0pkVU1tTk5XeFVib2RKcHMyNUJ5cDZFcXVKSTNaTVBpbkpoQSIsInhvIjoiIn0="
+
     user_id = str(acc.get("user_id") or "")
 
     headers = {
@@ -381,10 +387,13 @@ def fetch_live_fod(
         "User-Agent": "okhttp/4.9.0"
     }
 
+    # Respect account existing offer_bucket if present, else omit to let Meesho dynamically personalize
+    existing_bucket = str(acc.get("offer_bucket") or acc.get("bucket") or "").strip()
     body = {
-        "offer_bucket": "75",
         "from_language_modal": True
     }
+    if existing_bucket:
+        body["offer_bucket"] = existing_bucket
 
     sess = client.session if client else requests.Session()
     endpoint = f"{base_url}/api/1.0/anonymous/fod-personalisation"

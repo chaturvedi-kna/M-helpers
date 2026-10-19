@@ -192,12 +192,15 @@ class AssignmentPlanner:
 
         for idx, acc in enumerate(account_identifiers_or_files):
             # Resolve account identifier & source
-            if isinstance(acc, (str, Path)):
+            if isinstance(acc, tuple) and len(acc) >= 2:
+                acc_id = str(acc[0])
+                acc_source = str(acc[1])
+            elif isinstance(acc, (str, Path)):
                 acc_source = str(acc)
                 acc_id = Path(acc).stem
             elif isinstance(acc, dict):
                 acc_id = str(acc.get("mobile") or acc.get("user_id") or f"account_{idx}")
-                acc_source = "inline_dict"
+                acc_source = str(acc.get("source_reference") or "inline_dict")
             else:
                 acc_id = f"account_{idx}"
                 acc_source = str(acc)
@@ -260,6 +263,11 @@ class AssignmentExecutor:
         for assignment in self.plan.assignments:
             acc_id = assignment.account_id
             client = (account_client_map or {}).get(acc_id)
+            if not client and account_client_map:
+                for k in (assignment.account_id, assignment.account_source):
+                    if k in account_client_map:
+                        client = account_client_map[k]
+                        break
 
             item_res = {
                 "account_id": acc_id,
@@ -274,41 +282,54 @@ class AssignmentExecutor:
                 if not client:
                     item_res["status"] = "SKIPPED_NO_CLIENT"
                     item_res["error"] = f"No active client initialized for account '{acc_id}'"
+                    print(f"[-] Assignment: Account {acc_id} skipped — No client initialized", flush=True)
                     results.append(item_res)
                     continue
 
                 try:
                     # Execute address addition
+                    print(f"[*] Account {acc_id}: Adding address at pincode {assignment.assigned_address.get('pin')}...", flush=True)
                     addr_res = add_address(client, assignment.assigned_address)
                     item_res["registered_address_id"] = addr_res.get("id")
+                    print(f"[✓] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
 
                     # Execute product additions
                     added_prods = []
                     for p in assignment.assigned_products:
                         p_id = p["product_id"]
-                        info = get_product_info(client, p_id)
-                        in_stock = [v for v in info.get("variations", []) if v.get("in_stock")]
-                        chosen_var = in_stock[0] if in_stock else info["variations"][0]
+                        print(f"[*] Account {acc_id}: Fetching product info for {p_id}...", flush=True)
+                        try:
+                            info = get_product_info(client, p_id)
+                            in_stock = [v for v in info.get("variations", []) if v.get("in_stock")]
+                            chosen_var = in_stock[0] if in_stock else info["variations"][0]
 
-                        cart_res = add_product_to_cart(
-                            client=client,
-                            product_id=p_id,
-                            supplier_id=info["supplier_id"],
-                            variation_id=chosen_var["variation_id"],
-                            variation_name=chosen_var["variation_name"],
-                            quantity=1,
-                            price_type=self.plan.config.get("price_type", PRICE_TYPE_BASIC)
-                        )
+                            print(f"[*] Account {acc_id}: Adding product {p_id} to cart...", flush=True)
+                            cart_res = add_product_to_cart(
+                                client=client,
+                                product_id=p_id,
+                                supplier_id=info["supplier_id"],
+                                variation_id=chosen_var["variation_id"],
+                                variation_name=chosen_var["variation_name"],
+                                quantity=1,
+                                price_type=self.plan.config.get("price_type", PRICE_TYPE_BASIC)
+                            )
+                            cart_ok = bool(cart_res.get("success", True))
+                        except Exception as pe:
+                            print(f"[-] Account {acc_id}: Product {p_id} cart addition warning: {pe}", flush=True)
+                            cart_ok = False
+
                         added_prods.append({
                             "product_id": p_id,
-                            "cart_success": cart_res.get("success", False)
+                            "cart_success": cart_ok
                         })
 
                     item_res["added_products"] = added_prods
                     item_res["status"] = "SUCCESS"
+                    print(f"[✓] Account {acc_id}: Execution completed successfully!", flush=True)
 
                 except Exception as e:
                     logger.error(f"Error executing assignment for account {acc_id}: {e}")
+                    print(f"[-] Account {acc_id}: Execution failed: {e}", flush=True)
                     item_res["status"] = "FAILED"
                     item_res["error"] = str(e)
 

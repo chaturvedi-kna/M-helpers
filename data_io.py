@@ -44,6 +44,37 @@ def is_blacklisted_account(data: Any, source_path: str = "") -> bool:
     return False
 
 
+def extract_account_list_from_dict(d: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Unpacks embedded account lists from batch summaries or export wrappers:
+    - d['summary']['refreshed']
+    - d['refreshed']
+    - d['accounts']
+    - d['records']
+    - d['data']
+    - d['assignments']
+    - d['items']
+    """
+    if not isinstance(d, dict):
+        return None
+
+    # Check summary wrapper
+    summary = d.get("summary")
+    if isinstance(summary, dict):
+        for k in ("refreshed", "accounts", "records", "data", "scanned", "fresh_accounts", "used_accounts"):
+            val = summary.get(k)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                return val
+
+    # Check top-level keys
+    for k in ("refreshed", "accounts", "records", "data", "assignments", "items", "detailed_results"):
+        val = d.get(k)
+        if isinstance(val, list) and val and isinstance(val[0], dict):
+            return val
+
+    return None
+
+
 def load_accounts_from_source(
     source: Union[str, Path, List[Any], Dict[str, Any]],
     filter_blacklisted: bool = True
@@ -68,6 +99,10 @@ def load_accounts_from_source(
     if isinstance(source, list):
         for idx, item in enumerate(source):
             if isinstance(item, dict):
+                inner_list = extract_account_list_from_dict(item)
+                if inner_list is not None:
+                    records.extend(load_accounts_from_source(inner_list, filter_blacklisted=filter_blacklisted))
+                    continue
                 src_ref = item.get("source_reference") or f"list_item_{idx}"
                 if filter_blacklisted and is_blacklisted_account(item, src_ref):
                     continue
@@ -81,6 +116,10 @@ def load_accounts_from_source(
 
     # Case 2: Already a single Python dictionary
     if isinstance(source, dict):
+        inner_list = extract_account_list_from_dict(source)
+        if inner_list is not None:
+            return load_accounts_from_source(inner_list, filter_blacklisted=filter_blacklisted)
+
         src_ref = source.get("source_reference") or "dict_object"
         if not (filter_blacklisted and is_blacklisted_account(source, src_ref)):
             rec = dict(source)
@@ -148,6 +187,11 @@ def load_accounts_from_source(
         try:
             with open(p, "r", encoding="utf-8") as f:
                 content = json.load(f)
+            if isinstance(content, dict):
+                inner_list = extract_account_list_from_dict(content)
+                if inner_list is not None:
+                    return load_accounts_from_source(inner_list, filter_blacklisted=filter_blacklisted)
+
             if isinstance(content, list):
                 for idx, item in enumerate(content):
                     if isinstance(item, dict):
@@ -170,6 +214,11 @@ def load_accounts_from_source(
     if src_str.startswith("{") or src_str.startswith("["):
         try:
             parsed = json.loads(src_str)
+            if isinstance(parsed, dict):
+                inner_list = extract_account_list_from_dict(parsed)
+                if inner_list is not None:
+                    return load_accounts_from_source(inner_list, filter_blacklisted=filter_blacklisted)
+
             if isinstance(parsed, list):
                 for idx, item in enumerate(parsed):
                     if isinstance(item, dict):

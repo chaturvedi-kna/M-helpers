@@ -53,53 +53,71 @@ def extract_product_id(link_or_id: Union[str, int]) -> int:
 
 def get_product_info(client: MeeshoClient, product_id: int) -> Dict[str, Any]:
     """
-    Queries product dynamic metadata, suppliers, inventory, and variations.
-    Falls back to anonymous catalog request if authenticated account session fails.
+    Queries product metadata, suppliers, inventory, and variations.
+    Uses static endpoint (/api/3.0/product/static) first for reliable direct lookup,
+    falling back to dynamic endpoint or anonymous requests.
     """
-    path = f"/api/3.0/product/dynamic?id={product_id}&context=search&origin=catalog_search_results"
+    paths_to_try = [
+        f"/api/3.0/product/static?id={product_id}&context=search&ad_active=true",
+        f"/api/3.0/product/dynamic?id={product_id}&context=search&origin=catalog_search_results"
+    ]
     data = {}
-    try:
-        data = client.api_call("GET", path)
-    except Exception as e:
-        from config import DEFAULT_AUTHORIZATION, APP_VERSION, APP_VERSION_CODE, APP_SDK_VERSION
-        import uuid
-        import proxy_manager
+    last_err = None
+    for path in paths_to_try:
+        try:
+            res = client.api_call("GET", path)
+            if res and res.get("product") and res.get("product", {}).get("suppliers"):
+                data = res
+                break
+            elif res and res.get("product"):
+                data = res
+        except Exception as e:
+            last_err = e
+            # Try anonymous request for this path
+            from config import DEFAULT_AUTHORIZATION, APP_VERSION, APP_VERSION_CODE, APP_SDK_VERSION
+            import uuid
+            import proxy_manager
 
-        anon_headers = {
-            "Authorization": DEFAULT_AUTHORIZATION,
-            "App-Version": APP_VERSION,
-            "App-Version-Code": APP_VERSION_CODE,
-            "Instance-Id": uuid.uuid4().hex,
-            "Country-Iso": "in",
-            "Application-Id": "com.meesho.supply",
-            "App-Session-Id": uuid.uuid4().hex,
-            "App-Sdk-Version": APP_SDK_VERSION,
-            "App-Client-Id": "android",
-            "App-Iso-Language-Code": "en",
-            "Meesho-User-Context": "anonymous",
-            "X-Wishlist-Aggregation-Required": "false",
-            "Accept": "application/json",
-            "User-Agent": "okhttp/4.9.0",
-        }
-        anon_sess = requests.Session()
-        anon_sess.headers.update(anon_headers)
-        url = f"{client.api_host}{path}"
-        r = proxy_manager.request_with_retry(
-            session=anon_sess,
-            method="GET",
-            url=url,
-            timeout=12
-        )
-        if r.status_code == 200:
-            data = r.json()
-        else:
-            raise ValueError(f"Failed to fetch product metadata for {product_id} (Session query error: {e}; Anonymous fallback error: HTTP {r.status_code})")
+            anon_headers = {
+                "Authorization": DEFAULT_AUTHORIZATION,
+                "App-Version": APP_VERSION,
+                "App-Version-Code": APP_VERSION_CODE,
+                "Instance-Id": uuid.uuid4().hex,
+                "Country-Iso": "in",
+                "Application-Id": "com.meesho.supply",
+                "App-Session-Id": uuid.uuid4().hex,
+                "App-Sdk-Version": APP_SDK_VERSION,
+                "App-Client-Id": "android",
+                "App-Iso-Language-Code": "en",
+                "Meesho-User-Context": "anonymous",
+                "X-Wishlist-Aggregation-Required": "false",
+                "Accept": "application/json",
+                "User-Agent": "okhttp/4.9.0",
+            }
+            anon_sess = requests.Session()
+            anon_sess.headers.update(anon_headers)
+            url = f"{client.api_host}{path}"
+            try:
+                r = proxy_manager.request_with_retry(
+                    session=anon_sess,
+                    method="GET",
+                    url=url,
+                    timeout=12
+                )
+                if r.status_code == 200:
+                    cand = r.json()
+                    if cand.get("product"):
+                        data = cand
+                        if cand.get("product", {}).get("suppliers"):
+                            break
+            except Exception as anon_e:
+                last_err = anon_e
 
     prod = data.get("product") or {}
     suppliers = prod.get("suppliers") or []
 
     if not suppliers:
-        raise ValueError(f"No active suppliers available for product ID {product_id}")
+        raise ValueError(f"No active suppliers available for product ID {product_id} (last error: {last_err})")
 
     # Pick the cheapest or primary supplier
     supplier = sorted(suppliers, key=lambda s: s.get("price", float("inf")))[0]
