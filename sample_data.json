@@ -1,0 +1,64 @@
+{
+  "products": [
+    "624039638",
+    "https://www.meesho.com/tatasampann-unpolished-toor-dal-1kg/p/624039638",
+    "https://www.meesho.com/s/p/1010650234",
+    "513926576",
+    "545926880"
+  ],
+  "candidate_pincodes": [
+    "500092",
+    "110025",
+    "560001",
+    "400001",
+    "700001",
+    "600001"
+  ],
+  "address_pool": [
+    {
+      "name": "K V Sharma",
+      "mobile": "9182777959",
+      "address_line_1": "Flat 204, Green Heights, Road No 2",
+      "address_line_2": "Shivapuri Colony Phase 2, Boduppal",
+      "landmark": "Near Rama Reddy Nagar",
+      "city": "Hyderabad",
+      "state": "Telangana",
+      "pin": "500092",
+      "address_type": "Home"
+    },
+    {
+      "name": "Rohit Verma",
+      "mobile": "9876543210",
+      "address_line_1": "House No. 42, Pocket B",
+      "address_line_2": "Sukhdev Vihar, Okhla",
+      "landmark": "Near Metro Station",
+      "city": "New Delhi",
+      "state": "Delhi",
+      "pin": "110025",
+      "address_type": "Home"
+    },
+    {
+      "name": "Priya Nair",
+      "mobile": "9741234567",
+      "address_line_1": "12/A, 4th Main Road, Indiranagar",
+      "address_line_2": "Behind Defence Colony Club",
+      "landmark": "Near BDA Complex",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "pin": "560001",
+      "address_type": "Work"
+    },
+    {
+      "name": "Amit Kulkarni",
+      "mobile": "9820123456",
+      "address_line_1": "B-302, Sea View Apartments",
+      "address_line_2": "Fort, Marine Drive",
+      "landmark": "Opposite General Post Office",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "pin": "400001",
+      "address_type": "Home"
+    }
+  ]
+}
+

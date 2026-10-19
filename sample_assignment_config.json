@@ -1,0 +1,8 @@
+{
+  "products_per_account": 2,
+  "random_seed": 42,
+  "address_strategy": "round_robin",
+  "allow_product_reuse": true,
+  "price_type": "basic_return_price"
+}
+

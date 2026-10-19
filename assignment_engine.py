@@ -322,6 +322,61 @@ class AssignmentExecutor:
         }
 
 
+DEFAULT_PRODUCTS = [
+    "624039638",
+    "https://www.meesho.com/tatasampann-unpolished-toor-dal-1kg/p/624039638",
+    "513926576",
+    "545926880"
+]
+
+DEFAULT_ADDRESSES = [
+    {
+        "name": "K V Sharma",
+        "mobile": "9182777959",
+        "address_line_1": "Flat 204, Green Heights, Road No 2",
+        "address_line_2": "Shivapuri Colony Phase 2, Boduppal",
+        "landmark": "Near Rama Reddy Nagar",
+        "city": "Hyderabad",
+        "state": "Telangana",
+        "pin": "500092",
+        "address_type": "Home"
+    },
+    {
+        "name": "Rohit Verma",
+        "mobile": "9876543210",
+        "address_line_1": "House No. 42, Pocket B",
+        "address_line_2": "Sukhdev Vihar, Okhla",
+        "landmark": "Near Metro Station",
+        "city": "New Delhi",
+        "state": "Delhi",
+        "pin": "110025",
+        "address_type": "Home"
+    },
+    {
+        "name": "Priya Nair",
+        "mobile": "9741234567",
+        "address_line_1": "12/A, 4th Main Road, Indiranagar",
+        "address_line_2": "Behind Defence Colony Club",
+        "landmark": "Near BDA Complex",
+        "city": "Bengaluru",
+        "state": "Karnataka",
+        "pin": "560001",
+        "address_type": "Work"
+    },
+    {
+        "name": "Amit Kulkarni",
+        "mobile": "9820123456",
+        "address_line_1": "B-302, Sea View Apartments",
+        "address_line_2": "Fort, Marine Drive",
+        "landmark": "Opposite General Post Office",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "pin": "400001",
+        "address_type": "Home"
+    }
+]
+
+
 def run_bulk_assignment_from_source(
     products_source: Any,
     addresses_source: Any,
@@ -336,11 +391,19 @@ def run_bulk_assignment_from_source(
     Runs deterministic bulk assignment supporting:
     - Ingesting accounts from single file, directory, merged array, or JSONL.
     - Exporting outputs as 1-by-1 .txt files per account or combined JSON.
+    - Built-in safe fallbacks for products and addresses when files are absent.
     """
     from data_io import load_accounts_from_source, export_categorized_results
 
     # Load products
-    if isinstance(products_source, (str, Path)) and Path(str(products_source)).is_file():
+    prods = None
+    if not products_source or products_source == "sample_products.json":
+        if Path("sample_products.json").is_file():
+            with open("sample_products.json", "r", encoding="utf-8") as f:
+                prods = json.load(f)
+        else:
+            prods = DEFAULT_PRODUCTS
+    elif isinstance(products_source, (str, Path)) and Path(str(products_source)).is_file():
         with open(str(products_source), "r", encoding="utf-8") as f:
             prods = json.load(f)
     elif isinstance(products_source, list):
@@ -348,10 +411,17 @@ def run_bulk_assignment_from_source(
     elif isinstance(products_source, str) and (products_source.strip().startswith("[") or products_source.strip().startswith("{")):
         prods = json.loads(products_source)
     else:
-        raise ValueError(f"Invalid products source: {products_source}")
+        prods = DEFAULT_PRODUCTS
 
     # Load addresses
-    if isinstance(addresses_source, (str, Path)) and Path(str(addresses_source)).is_file():
+    addrs = None
+    if not addresses_source or addresses_source == "sample_addresses.json":
+        if Path("sample_addresses.json").is_file():
+            with open("sample_addresses.json", "r", encoding="utf-8") as f:
+                addrs = json.load(f)
+        else:
+            addrs = DEFAULT_ADDRESSES
+    elif isinstance(addresses_source, (str, Path)) and Path(str(addresses_source)).is_file():
         with open(str(addresses_source), "r", encoding="utf-8") as f:
             addrs = json.load(f)
     elif isinstance(addresses_source, list):
@@ -359,7 +429,7 @@ def run_bulk_assignment_from_source(
     elif isinstance(addresses_source, str) and (addresses_source.strip().startswith("[") or addresses_source.strip().startswith("{")):
         addrs = json.loads(addresses_source)
     else:
-        raise ValueError(f"Invalid addresses source: {addresses_source}")
+        addrs = DEFAULT_ADDRESSES
 
     # Load accounts with strict operator blacklist filtering
     accounts = load_accounts_from_source(accounts_source)

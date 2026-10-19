@@ -7,6 +7,10 @@
 # Account credentials and session files (JSON / JSONL)
 *.json
 *.jsonl
+!sample_products.json
+!sample_addresses.json
+!sample_data.json
+!sample_assignment_config.json
 *7977748514*
 
 # Environment and secret tokens

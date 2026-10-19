@@ -334,6 +334,40 @@ class TestEnhancements(unittest.TestCase):
             self.assertTrue(p_data["success"])
             self.assertEqual(p_data["report"]["product_id"], "624039638")
 
+        # 5. Pricing comparison must fail with 400 when account credentials are not provided
+        no_acc_resp = test_client.post("/api/compare-pricing", json={
+            "product": "624039638",
+            "pincodes": "500092, 110025"
+        })
+        self.assertEqual(no_acc_resp.status_code, 400)
+        self.assertFalse(no_acc_resp.get_json()["success"])
+        self.assertIn("Account credentials are required", no_acc_resp.get_json()["error"])
+
+        # 6. Test /api/live-fod with POST account_data
+        with patch("web_ui.fetch_live_fod") as mock_fod:
+            mock_fod.return_value = MagicMock(
+                advertised_tier="tier_170",
+                advertised_amount=170,
+                to_dict=lambda include_raw=False: {"advertised_tier": "tier_170", "advertised_amount": 170}
+            )
+            fod_resp = test_client.post("/api/live-fod", json={
+                "account_data": {"mobile": "8869049741", "user_id": 602413725, "xo": "test.xo"}
+            })
+            self.assertEqual(fod_resp.status_code, 200)
+            self.assertEqual(fod_resp.get_json()["advertised_tier"], "tier_170")
+
+        # 7. Test /api/run-assignment with missing files falling back to built-in defaults
+        fallback_assign_resp = test_client.post("/api/run-assignment", json={
+            "accounts_source": sample_uploaded_accounts,
+            "products_source": "non_existent_products.json",
+            "addresses_source": "non_existent_addresses.json",
+            "seed": 42,
+            "count": 1,
+            "dry_run": True
+        })
+        self.assertEqual(fallback_assign_resp.status_code, 200)
+        self.assertTrue(fallback_assign_resp.get_json()["success"])
+
     def test_supabase_module_and_gitignore(self):
         """Verifies Supabase module graceful degradation and .gitignore rules."""
         import supabase_db
@@ -353,5 +387,6 @@ class TestEnhancements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
