@@ -6,6 +6,7 @@ Handles Account JSON loading, header generation, and headless token refresh.
 import base64
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -60,21 +61,46 @@ def build_meesho_headers(account_data: Dict[str, Any]) -> Dict[str, str]:
     u_token = base64.b64encode(phone.encode()).decode() if phone else ""
     auth = account_data.get("authorization") or identity.get("authorization") or DEFAULT_AUTHORIZATION
     shield_id = account_data.get("shield_session_id") or identity.get("shield_session_id") or DEFAULT_SHIELD_SESSION_ID
-    instance_id = str(account_data.get("instance_id") or identity.get("instance_id") or uuid.uuid4().hex)
+    xo = str(account_data.get("xo") or "")
+
+    # Align instance_id with embedded instance_id in XO token JWT payload
+    jwt_instance_id = None
+    if xo:
+        try:
+            parts = xo.split(".")
+            if len(parts) >= 2:
+                pad = parts[1] + "=" * (-len(parts[1]) % 4)
+                outer = json.loads(base64.urlsafe_b64decode(pad.encode()))
+                jwt_str = outer.get("jwt", "")
+                if "." in jwt_str:
+                    jwt_p = jwt_str.split(".")[1]
+                    jwt_pad = jwt_p + "=" * (-len(jwt_p) % 4)
+                    raw_payload = base64.urlsafe_b64decode(jwt_pad.encode()).decode("utf-8", errors="replace")
+                    try:
+                        jwt_payload = json.loads(raw_payload)
+                        jwt_instance_id = jwt_payload.get("https://meesho.com/instance_id")
+                    except Exception:
+                        match = re.search(r'"https://meesho\.com/instance_id"\s*:\s*"([^"]+)"', raw_payload)
+                        if match:
+                            jwt_instance_id = match.group(1)
+        except Exception:
+            pass
+
+    instance_id = jwt_instance_id or str(account_data.get("instance_id") or identity.get("instance_id") or uuid.uuid4().hex)
     app_session_id = str(identity.get("app_session_id") or uuid.uuid4().hex)
     gaid = str(account_data.get("gaid") or identity.get("gaid") or "")
-    xo = str(account_data.get("xo") or "")
 
     headers = {
         "Authorization": auth,
-        "App-Version": str(account_data.get("app_version", APP_VERSION)),
-        "App-Version-Code": str(account_data.get("app_version_code", APP_VERSION_CODE)),
+        "App-Version": APP_VERSION,
+        "App-Version-Code": APP_VERSION_CODE,
         "Instance-Id": instance_id,
         "Country-Iso": "in",
         "Application-Id": "com.meesho.supply",
         "App-Session-Id": app_session_id,
         "App-Sdk-Version": APP_SDK_VERSION,
         "App-Client-Id": "android",
+        "App-Iso-Language-Code": "en",
         "Shield-Session-Id": shield_id,
         "Xo": xo,
         "App-User-Id": user_id,
@@ -202,11 +228,15 @@ def refresh_account_via_telegram(
             raise TimeoutError("Timed out waiting for @Meeshojsoncheckerbot to return refreshed JSON.")
 
         # Update in-memory data
-        account_data["xo"] = refreshed_data.get("xo")
+        for k, v in refreshed_data.items():
+            if v is not None:
+                account_data[k] = v
+        if "xo" in refreshed_data:
+            account_data["xo"] = refreshed_data["xo"]
         if "ox" in refreshed_data:
-            account_data["ox"] = refreshed_data.get("ox")
+            account_data["ox"] = refreshed_data["ox"]
         if "user_id" in refreshed_data:
-            account_data["user_id"] = refreshed_data.get("user_id")
+            account_data["user_id"] = refreshed_data["user_id"]
 
         if file_path:
             save_account_json(account_data, file_path)

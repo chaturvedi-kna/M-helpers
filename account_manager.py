@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -103,7 +104,7 @@ def parse_xo_token(xo_string: str) -> TokenMetadata:
     padded = payload_b64 + "=" * (-len(payload_b64) % 4)
 
     try:
-        outer_json = json.loads(base64.b64decode(padded).decode("utf-8", errors="replace"))
+        outer_json = json.loads(base64.urlsafe_b64decode(padded.encode()).decode("utf-8", errors="replace"))
     except Exception as e:
         raise ValueError(f"Could not decode composite XO payload: {e}")
 
@@ -119,14 +120,27 @@ def parse_xo_token(xo_string: str) -> TokenMetadata:
         jwt_parts = jwt_str.split(".")
         if len(jwt_parts) >= 2:
             jwt_payload_b64 = jwt_parts[1] + "=" * (-len(jwt_parts[1]) % 4)
+            raw_claims = base64.urlsafe_b64decode(jwt_payload_b64.encode()).decode("utf-8", errors="replace")
             try:
-                jwt_claims = json.loads(base64.b64decode(jwt_payload_b64).decode("utf-8", errors="replace"))
+                jwt_claims = json.loads(raw_claims)
                 issued_at = float(jwt_claims.get("iat")) if "iat" in jwt_claims else None
                 expires_at = float(jwt_claims.get("exp")) if "exp" in jwt_claims else None
                 user_id = str(jwt_claims.get("https://meesho.com/user_id") or "")
                 instance_id = str(jwt_claims.get("https://meesho.com/instance_id") or "")
             except Exception as e:
-                logger.debug(f"Failed parsing inner JWT claims: {e}")
+                logger.debug(f"Failed parsing inner JWT claims with json.loads, attempting regex fallback: {e}")
+                exp_m = re.search(r'"exp"\s*:\s*(\d+)', raw_claims)
+                if exp_m:
+                    expires_at = float(exp_m.group(1))
+                iat_m = re.search(r'"iat"\s*:\s*(\d+)', raw_claims)
+                if iat_m:
+                    issued_at = float(iat_m.group(1))
+                uid_m = re.search(r'"https://meesho\.com/user_id"\s*:\s*"?(\d+)"?', raw_claims)
+                if uid_m:
+                    user_id = uid_m.group(1)
+                iid_m = re.search(r'"https://meesho\.com/instance_id"\s*:\s*"([^"]+)"', raw_claims)
+                if iid_m:
+                    instance_id = iid_m.group(1)
 
     now = time.time()
     if expires_at is not None:
@@ -403,6 +417,9 @@ class TelegramTokenRefreshProvider(BaseTokenRefreshProvider):
 
             # Merge updated fields safely without corrupting original fields
             updated = dict(account_data)
+            for k, v in refreshed_payload.items():
+                if v is not None:
+                    updated[k] = v
             if "xo" in refreshed_payload:
                 updated["xo"] = refreshed_payload["xo"]
             if "ox" in refreshed_payload:
@@ -481,6 +498,17 @@ def refresh_accounts_from_source(
             refreshed = refresh_prov.refresh(acc)
             refreshed_list.append(refreshed)
         except Exception as e:
+            if isinstance(refresh_prov, DirectApiTokenRefreshProvider):
+                try:
+                    logger.info(f"Direct API refresh failed for {user_id}: {e}. Falling back to Telegram bot...")
+                    from auth import refresh_account_via_telegram
+                    refreshed = refresh_account_via_telegram(acc)
+                    refreshed_list.append(refreshed)
+                    continue
+                except Exception as tg_err:
+                    logger.warning(f"Telegram bot refresh fallback failed for {user_id}: {tg_err}")
+                    e = tg_err
+
             failed_list.append({
                 "account_id": user_id,
                 "source_reference": acc.get("source_reference"),

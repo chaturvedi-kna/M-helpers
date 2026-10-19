@@ -434,14 +434,30 @@ def run_bulk_assignment_from_source(
     # Load accounts with strict operator blacklist filtering
     accounts = load_accounts_from_source(accounts_source)
     account_identifiers = []
-    for acc in accounts:
-        aid = str(acc.get("user_id") or acc.get("mobile") or acc.get("source_reference"))
-        account_identifiers.append((aid, acc.get("source_reference", "<inline>")))
+    effective_client_map = dict(client_map) if client_map else {}
+
+    for idx, acc in enumerate(accounts):
+        aid = str(acc.get("user_id") or acc.get("mobile") or acc.get("source_reference") or f"account_{idx}")
+        src = str(acc.get("source_reference", f"account_{idx}"))
+        account_identifiers.append((aid, src))
+
+        # Auto-initialize client for live execution if not explicitly provided
+        if not dry_run:
+            client_obj = effective_client_map.get(aid) or effective_client_map.get(src)
+            if not client_obj:
+                try:
+                    from meesho_client import MeeshoClient
+                    client_obj = MeeshoClient(account_data=acc, auto_refresh=True)
+                    effective_client_map[aid] = client_obj
+                    effective_client_map[src] = client_obj
+                    effective_client_map[f"account_{idx}"] = client_obj
+                except Exception as ce:
+                    logger.warning(f"Could not initialize MeeshoClient for account {aid}: {ce}")
 
     planner = AssignmentPlanner(config or AssignmentRuleConfig())
     plan = planner.create_plan(product_refs=prods, addresses=addrs, account_identifiers_or_files=account_identifiers)
     executor = AssignmentExecutor(plan)
-    exec_result = executor.execute_plan(account_client_map=client_map, dry_run=dry_run)
+    exec_result = executor.execute_plan(account_client_map=effective_client_map, dry_run=dry_run)
 
     if output_dir:
         categorized = {

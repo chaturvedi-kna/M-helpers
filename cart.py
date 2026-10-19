@@ -54,9 +54,47 @@ def extract_product_id(link_or_id: Union[str, int]) -> int:
 def get_product_info(client: MeeshoClient, product_id: int) -> Dict[str, Any]:
     """
     Queries product dynamic metadata, suppliers, inventory, and variations.
+    Falls back to anonymous catalog request if authenticated account session fails.
     """
     path = f"/api/3.0/product/dynamic?id={product_id}&context=search&origin=catalog_search_results"
-    data = client.api_call("GET", path)
+    data = {}
+    try:
+        data = client.api_call("GET", path)
+    except Exception as e:
+        from config import DEFAULT_AUTHORIZATION, APP_VERSION, APP_VERSION_CODE, APP_SDK_VERSION
+        import uuid
+        import proxy_manager
+
+        anon_headers = {
+            "Authorization": DEFAULT_AUTHORIZATION,
+            "App-Version": APP_VERSION,
+            "App-Version-Code": APP_VERSION_CODE,
+            "Instance-Id": uuid.uuid4().hex,
+            "Country-Iso": "in",
+            "Application-Id": "com.meesho.supply",
+            "App-Session-Id": uuid.uuid4().hex,
+            "App-Sdk-Version": APP_SDK_VERSION,
+            "App-Client-Id": "android",
+            "App-Iso-Language-Code": "en",
+            "Meesho-User-Context": "anonymous",
+            "X-Wishlist-Aggregation-Required": "false",
+            "Accept": "application/json",
+            "User-Agent": "okhttp/4.9.0",
+        }
+        anon_sess = requests.Session()
+        anon_sess.headers.update(anon_headers)
+        url = f"{client.api_host}{path}"
+        r = proxy_manager.request_with_retry(
+            session=anon_sess,
+            method="GET",
+            url=url,
+            timeout=12
+        )
+        if r.status_code == 200:
+            data = r.json()
+        else:
+            raise ValueError(f"Failed to fetch product metadata for {product_id} (Session query error: {e}; Anonymous fallback error: HTTP {r.status_code})")
+
     prod = data.get("product") or {}
     suppliers = prod.get("suppliers") or []
 

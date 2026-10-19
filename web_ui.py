@@ -1037,10 +1037,15 @@ HTML_TEMPLATE = """
           return;
         }
 
+        const bucketBadge = data.offer_bucket ? `<span class="ml-2 px-2 py-0.5 rounded text-xs font-mono font-semibold bg-amber-950 text-amber-300 border border-amber-800">Bucket: ${data.offer_bucket}</span>` : '';
+
         container.innerHTML = `
           <div class="flex items-center justify-between">
             <div>
-              <span class="text-xs uppercase font-semibold text-slate-400">Active Advertised Tier</span>
+              <div class="flex items-center">
+                <span class="text-xs uppercase font-semibold text-slate-400">Active Advertised Tier</span>
+                ${bucketBadge}
+              </div>
               <h3 class="text-2xl font-bold text-amber-400 mt-1">${(data.advertised_tier || 'NO_OFFER').toUpperCase()}</h3>
               <p class="text-xs text-slate-300 mt-1">${data.eligibility_reason || 'Live promotional offer status'}</p>
             </div>

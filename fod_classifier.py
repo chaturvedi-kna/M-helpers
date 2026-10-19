@@ -32,6 +32,7 @@ class FODRecord:
     raw_offer_text: Optional[str]
     eligibility_status: EligibilityStatus
     eligibility_reason: str
+    offer_bucket: Optional[str] = None
     is_duplicate: bool = False
     validation_errors: List[str] = field(default_factory=list)
     raw_data: Optional[Dict[str, Any]] = None
@@ -43,6 +44,7 @@ class FODRecord:
             "mobile": self.mobile,
             "advertised_tier": self.advertised_tier,
             "advertised_amount": self.advertised_amount,
+            "offer_bucket": self.offer_bucket,
             "raw_offer_text": self.raw_offer_text,
             "eligibility_status": self.eligibility_status.value,
             "eligibility_reason": self.eligibility_reason,
@@ -217,7 +219,16 @@ def classify_single_fod_record(
         errors.append(f"Offer text '{raw_text}' found but could not extract numeric discount amount.")
     else:
         tier_name = "no_offer"
-        rationale = "No FOD promotional offer present in record."
+    # Extract offer bucket
+    offer_bucket = None
+    if "surgical_first_order_discount_v3" in data and isinstance(data["surgical_first_order_discount_v3"], dict):
+        bucket_val = data["surgical_first_order_discount_v3"].get("offer_bucket")
+        if bucket_val:
+            offer_bucket = str(bucket_val)
+    if not offer_bucket and "offer_bucket" in data:
+        offer_bucket = str(data["offer_bucket"])
+    if not offer_bucket and amount is not None:
+        offer_bucket = str(amount)
 
     return FODRecord(
         source_reference=source_reference,
@@ -228,6 +239,7 @@ def classify_single_fod_record(
         raw_offer_text=raw_text,
         eligibility_status=eligibility_status,
         eligibility_reason=rationale,
+        offer_bucket=offer_bucket,
         validation_errors=errors,
         raw_data=data
     )
@@ -417,7 +429,7 @@ def fetch_live_fod(
 
 def classify_fod_from_source(
     source: Any,
-    live: bool = False,
+    live: bool = True,
     output_dir: Optional[Union[str, Path]] = None,
     format_type: str = "combined_json",
     client=None,

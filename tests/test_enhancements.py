@@ -384,6 +384,99 @@ class TestEnhancements(unittest.TestCase):
         self.assertIn("*.json", content)
         self.assertIn("7977748514", content)
 
+    def test_robust_jwt_parsing_with_malformed_quote(self):
+        """Verifies parse_xo_token parses Meesho JWTs even with malformed quotes on user_id."""
+        import base64
+        from account_manager import parse_xo_token
+
+        # Construct JWT with missing closing quote after user_id
+        raw_claims = '{"exp":1791561584,"https://meesho.com/instance_id":"afb8ae73167b4f6eb93ddf9824d87efc","https://meesho.com/user_id":"602863348,"iat":1791388078}'
+        header_b64 = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').decode().rstrip("=")
+        claims_b64 = base64.urlsafe_b64encode(raw_claims.encode()).decode().rstrip("=")
+        fake_jwt = f"{header_b64}.{claims_b64}.mock_sig"
+        outer = json.dumps({"jwt": fake_jwt, "xo": "mock_xo"})
+        outer_b64 = base64.urlsafe_b64encode(outer.encode()).decode().rstrip("=")
+        composite_xo = f"eyJ0eXBlIjoiY29tcG9zaXRlIn0=.{outer_b64}"
+
+        meta = parse_xo_token(composite_xo)
+        self.assertEqual(meta.user_id, "602863348")
+        self.assertEqual(meta.instance_id, "afb8ae73167b4f6eb93ddf9824d87efc")
+        self.assertEqual(meta.expires_at, 1791561584.0)
+
+    def test_order_classifier_referral_done_and_list_keys(self):
+        """Verifies account_classifier accurately detects used status from referral_done and order list keys."""
+        from account_classifier import extract_order_history_info, classify_account_data, AccountClassification
+
+        # 1. _referral_done inside identity
+        acc1 = {
+            "mobile": "9232582410",
+            "user_id": 602863348,
+            "xo": "fake.xo",
+            "identity": {"_referral_done": True}
+        }
+        res1 = classify_account_data(acc1, live=False)
+        self.assertEqual(res1.classification, AccountClassification.USED)
+        self.assertEqual(res1.order_count, 1)
+
+        # 2. sub_order_list
+        acc2 = {
+            "mobile": "9232582411",
+            "user_id": 602863349,
+            "xo": "fake.xo",
+            "sub_order_list": [{"id": 1}, {"id": 2}]
+        }
+        res2 = classify_account_data(acc2, live=False)
+        self.assertEqual(res2.classification, AccountClassification.USED)
+        self.assertEqual(res2.order_count, 2)
+
+    def test_fod_record_bucket_field(self):
+        """Verifies FODRecord captures and serializes offer_bucket."""
+        from fod_classifier import classify_single_fod_record
+
+        sample_fod_payload = {
+            "surgical_first_order_discount_v3": {
+                "offer_bucket": "170",
+                "enabled": True,
+                "offer": {
+                    "max_offer_value": 170,
+                    "offer_text": "Flat ₹170 off on first order"
+                }
+            }
+        }
+        rec = classify_single_fod_record(sample_fod_payload)
+        d = rec.to_dict()
+        self.assertEqual(d["advertised_tier"], "tier_170")
+        self.assertEqual(d["advertised_amount"], 170)
+        self.assertEqual(d["offer_bucket"], "170")
+
+    def test_live_assignment_auto_initializes_clients(self):
+        """Verifies run_bulk_assignment_from_source in live mode initializes clients without SKIPPED_NO_CLIENT."""
+        from unittest.mock import patch
+        from assignment_engine import run_bulk_assignment_from_source, DEFAULT_ADDRESSES
+
+        accs = [{"mobile": "8869049741", "user_id": 602413725, "xo": "fake.xo"}]
+        with patch("assignment_engine.add_address") as mock_addr, \
+             patch("assignment_engine.get_product_info") as mock_info, \
+             patch("assignment_engine.add_product_to_cart") as mock_cart:
+            mock_addr.return_value = {"id": "addr_999"}
+            mock_info.return_value = {
+                "supplier_id": 1,
+                "variations": [{"variation_id": 1, "variation_name": "Free Size", "in_stock": True}]
+            }
+            mock_cart.return_value = {"success": True}
+
+            result = run_bulk_assignment_from_source(
+                products_source=["624039638"],
+                addresses_source=DEFAULT_ADDRESSES,
+                accounts_source=accs,
+                dry_run=False
+            )
+            self.assertEqual(result["mode"], "LIVE_EXECUTION")
+            self.assertEqual(result["total_accounts"], 1)
+            item = result["results"][0]
+            self.assertNotEqual(item["status"], "SKIPPED_NO_CLIENT")
+            self.assertEqual(item["status"], "SUCCESS")
+
 
 if __name__ == "__main__":
     unittest.main()

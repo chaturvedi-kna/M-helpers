@@ -120,6 +120,18 @@ def extract_order_history_info(data: Dict[str, Any]) -> Tuple[Optional[int], str
                 return int(val.strip()), f"Explicit '{count_key}' count is {val.strip()}", True
             return None, f"Field '{count_key}' is not a valid non-negative integer", False
 
+    # Case 4: Other list formats
+    for list_key in ("orders_list", "order_list", "sub_orders", "sub_order_list"):
+        if list_key in data and isinstance(data[list_key], list):
+            return len(data[list_key]), f"Found '{list_key}' with {len(data[list_key])} entries", True
+
+    # Case 5: Referral / first order boolean indicators
+    identity = data.get("identity") if isinstance(data.get("identity"), dict) else {}
+    if data.get("is_first_order") is False or identity.get("is_first_order") is False:
+        return 1, "Account metadata indicates first order already used (is_first_order=False)", True
+    if data.get("_referral_done") is True or identity.get("_referral_done") is True:
+        return 1, "Account metadata indicates referral order already completed (_referral_done=True)", True
+
     # Order history information is completely absent
     return None, "Order history information is missing from the record", False
 
@@ -132,11 +144,11 @@ def fetch_live_order_count(
     """
     Directly queries Meesho's authenticated order history API (/api/3.0/user/orders)
     to determine live order count for the account. Automatically refreshes expired
-    XO tokens using DirectApiTokenRefreshProvider if needed.
+    XO tokens using Direct API and Telegram bot fallback.
     Returns (order_count, explanation, is_complete).
     """
-    import base64
     import requests
+    from auth import build_meesho_headers, refresh_account_via_telegram
     from account_manager import DirectApiTokenRefreshProvider, is_token_expired
 
     user_id = account_data.get("user_id")
@@ -144,41 +156,26 @@ def fetch_live_order_count(
         return None, "Missing user_id for live orders query", False
 
     curr_acc = dict(account_data)
+
+    def _refresh(acc):
+        try:
+            prov = DirectApiTokenRefreshProvider(api_host=api_host)
+            return prov.refresh(acc)
+        except Exception as de:
+            logger.info(f"Direct API refresh failed ({de}), trying Telegram fallback...")
+            return refresh_account_via_telegram(acc)
+
     if auto_refresh and is_token_expired(curr_acc):
         try:
-            provider = DirectApiTokenRefreshProvider(api_host=api_host)
-            curr_acc = provider.refresh(curr_acc)
+            curr_acc = _refresh(curr_acc)
         except Exception as e:
             logger.warning(f"Failed to auto-refresh token before live orders query: {e}")
 
-    phone = curr_acc.get("phone") or (f"+91{curr_acc['mobile']}" if curr_acc.get("mobile") else "")
-    u_token = base64.b64encode(phone.encode()).decode() if phone else ""
-    identity = curr_acc.get("identity") or {}
-
-    headers = {
-        "Authorization": curr_acc.get("authorization") or "32c4d8137cn9eb493a1921f203173080",
-        "App-Version": "29.5",
-        "App-Version-Code": "868",
-        "Instance-Id": str(curr_acc.get("instance_id") or identity.get("instance_id") or "unknown"),
-        "Country-Iso": "in",
-        "Application-Id": "com.meesho.supply",
-        "App-Session-Id": str(identity.get("app_session_id") or "1a047084893d4f8fb23f1adebb000cf8"),
-        "App-Sdk-Version": "34",
-        "App-Client-Id": "android",
-        "Shield-Session-Id": str(identity.get("shield_session_id") or "1a047084893d4f8fb23f1adebb000cf8"),
-        "Xo": str(curr_acc.get("xo", "")),
-        "App-User-Id": str(user_id),
-        "U-Token": u_token,
-        "Meesho-User-Context": "logged_in",
-        "Accept": "application/json",
-        "Content-Type": "application/json; charset=UTF-8",
-        "User-Agent": "okhttp/4.9.0"
-    }
-
+    headers = build_meesho_headers(curr_acc)
     url = f"{api_host.rstrip('/')}/api/3.0/user/orders"
     payload = {
-        "limit": 10,
-        "filters": {"sub_order_status": [0]},
+        "limit": 20,
+        "filters": {},
         "user_id": int(user_id)
     }
 
@@ -192,21 +189,22 @@ def fetch_live_order_count(
             url=url,
             account_key=str(user_id),
             json=payload,
-            timeout=12
+            timeout=15
         )
         if r.status_code == 401 and auto_refresh:
-            # Retry once after explicit direct refresh
+            # Retry once after explicit refresh
             try:
-                provider = DirectApiTokenRefreshProvider(api_host=api_host)
-                curr_acc = provider.refresh(curr_acc)
-                sess.headers["Xo"] = str(curr_acc.get("xo", ""))
+                curr_acc = _refresh(curr_acc)
+                headers = build_meesho_headers(curr_acc)
+                sess.headers.clear()
+                sess.headers.update(headers)
                 r = proxy_manager.request_with_retry(
                     session=sess,
                     method="POST",
                     url=url,
                     account_key=str(user_id),
                     json=payload,
-                    timeout=12
+                    timeout=15
                 )
             except Exception as ref_err:
                 logger.warning(f"Live orders token refresh on 401 failed: {ref_err}")
@@ -214,8 +212,13 @@ def fetch_live_order_count(
 
         if r.status_code == 200:
             orders_data = r.json()
-            sub_orders = orders_data.get("sub_order_list") or []
-            return len(sub_orders), f"Live Meesho API orders query returned {len(sub_orders)} orders", True
+            sub_orders = orders_data.get("sub_order_list") or orders_data.get("orders") or orders_data.get("order_list") or []
+            total_orders = orders_data.get("total") or orders_data.get("count")
+            if total_orders is not None and isinstance(total_orders, int):
+                count = total_orders
+            else:
+                count = len(sub_orders)
+            return count, f"Live Meesho API query confirmed {count} total order(s)", True
         else:
             return None, f"Live Meesho API returned HTTP {r.status_code}: {r.text[:120]}", False
     except Exception as e:
@@ -253,18 +256,18 @@ def classify_account_data(
 
     is_valid_schema = len(errors) == 0
 
-    # Inspect order history
+    # Inspect order history from static record
     order_count, explanation, is_complete = extract_order_history_info(data)
 
-    if (not is_complete or order_count is None) and live and is_valid_schema:
-        # Attempt live API query
+    # When live=True, query live API if static record is incomplete or if live verification is requested
+    if live and is_valid_schema:
         live_count, live_expl, live_ok = fetch_live_order_count(data)
         if live_ok and live_count is not None:
             order_count = live_count
             explanation = live_expl
             is_complete = True
         else:
-            explanation += f" (Live query attempt: {live_expl})"
+            explanation = f"{explanation} (Live query note: {live_expl})".strip()
 
     if not is_complete or order_count is None:
         # Strictly classified as UNKNOWN per requirement
