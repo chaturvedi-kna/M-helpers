@@ -477,6 +477,229 @@ class TestEnhancements(unittest.TestCase):
             self.assertNotEqual(item["status"], "SKIPPED_NO_CLIENT")
             self.assertEqual(item["status"], "SUCCESS")
 
+    def test_order_classification_fresh_used_download_and_refresh_state(self):
+        """Verifies Enhancement 1: fresh and used accounts extraction, token refresh state, and count JSONs."""
+        from account_classifier import classify_accounts_from_source
+
+        accounts = [
+            {"user_id": 9001, "mobile": "9999909001", "xo": "mock.xo.1", "orders": []},
+            {"user_id": 9002, "mobile": "9999909002", "xo": "mock.xo.2", "orders": [{"id": 101}]},
+            {"user_id": 9003, "mobile": "9999909003", "xo": "mock.xo.3", "orders": [{"id": 102}, {"id": 103}]}
+        ]
+
+        summary = classify_accounts_from_source(accounts, live=False)
+        self.assertEqual(summary.fresh_count, 1)
+        self.assertEqual(summary.used_count, 2)
+        self.assertEqual(summary.unknown_count, 0)
+
+        fresh_recs = summary.get_fresh_account_records()
+        used_recs = summary.get_used_account_records()
+        combined_recs = summary.get_combined_account_records()
+
+        self.assertEqual(len(fresh_recs), 1)
+        self.assertEqual(fresh_recs[0]["user_id"], 9001)
+        self.assertEqual(fresh_recs[0]["xo"], "mock.xo.1")
+
+        self.assertEqual(len(used_recs), 2)
+        self.assertEqual(len(combined_recs), 3)
+
+        # Test output_dir writing fresh_1.json, used_2.json, combined_3.json
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            summary_with_export = classify_accounts_from_source(accounts, output_dir=tmp_dir, live=False)
+            out_p = Path(tmp_dir)
+            self.assertTrue((out_p / "fresh_1.json").is_file())
+            self.assertTrue((out_p / "used_2.json").is_file())
+            self.assertTrue((out_p / "combined_3.json").is_file())
+
+            with open(out_p / "fresh_1.json", "r", encoding="utf-8") as f:
+                saved_fresh = json.load(f)
+            self.assertEqual(len(saved_fresh), 1)
+            self.assertEqual(saved_fresh[0]["user_id"], 9001)
+
+    def test_decoupled_bulk_seeding_cart_only_and_address_only_and_user_sets(self):
+        """Verifies Enhancement 2: decoupled bulk seeding (cart only, address only) with custom sets and no defaults."""
+        from assignment_engine import run_bulk_assignment_from_source, AssignmentRuleConfig, AssignmentPlanner
+
+        accounts = [
+            {"user_id": 8001, "mobile": "9999908001", "xo": "mock.xo.1"},
+            {"user_id": 8002, "mobile": "9999908002", "xo": "mock.xo.2"}
+        ]
+        user_products = ["624039638", "513926576"]
+        user_address = [{
+            "name": "Custom User",
+            "mobile": "9182777959",
+            "address_line_1": "Flat 101, Test Road",
+            "city": "Hyderabad",
+            "state": "Telangana",
+            "pin": "500092"
+        }]
+
+        # 1. Cart Only Mode: No address needed or assigned
+        cfg_cart = AssignmentRuleConfig(
+            mode="cart_only",
+            cart_set_name="My Custom Cart Set",
+            products_per_account=1,
+            random_seed=42
+        )
+        plan_cart = run_bulk_assignment_from_source(
+            products_source=user_products,
+            accounts_source=accounts,
+            config=cfg_cart,
+            dry_run=True
+        )
+        self.assertEqual(plan_cart["operation_mode"], "cart_only")
+        self.assertEqual(plan_cart["cart_set_name"], "My Custom Cart Set")
+        for res in plan_cart["results"]:
+            self.assertEqual(res["assigned_products_count"], 1)
+            self.assertIsNone(res["assigned_address_pincode"])
+
+        # 2. Address Only Mode: No products needed or assigned
+        cfg_addr = AssignmentRuleConfig(
+            mode="address_only",
+            address_set_name="My Custom Address Set",
+            random_seed=42
+        )
+        plan_addr = run_bulk_assignment_from_source(
+            addresses_source=user_address,
+            accounts_source=accounts,
+            config=cfg_addr,
+            dry_run=True
+        )
+        self.assertEqual(plan_addr["operation_mode"], "address_only")
+        self.assertEqual(plan_addr["address_set_name"], "My Custom Address Set")
+        for res in plan_addr["results"]:
+            self.assertEqual(res["assigned_products_count"], 0)
+            self.assertEqual(res["assigned_address_pincode"], "500092")
+
+        # 3. No Defaults Enforcement: empty products in cart_only mode raises error
+        with self.assertRaises(ValueError):
+            run_bulk_assignment_from_source(
+                products_source=None,
+                accounts_source=accounts,
+                config=AssignmentRuleConfig(mode="cart_only", cart_set_name="Empty Cart"),
+                dry_run=True
+            )
+
+        # 4. No Defaults Enforcement: empty addresses in address_only mode raises error
+        with self.assertRaises(ValueError):
+            run_bulk_assignment_from_source(
+                addresses_source=None,
+                accounts_source=accounts,
+                config=AssignmentRuleConfig(mode="address_only", address_set_name="Empty Addr"),
+                dry_run=True
+            )
+
+    def test_delivery_price_optimization_account_specific_context(self):
+        """Verifies Enhancement 3: Pricing comparator captures account context and verifies account specific pricing."""
+        from pricing_comparator import ProductPricingComparator, ComparisonStatus
+        from meesho_client import MeeshoClient
+
+        mock_account = {
+            "mobile": "8869049741",
+            "user_id": 492252136,
+            "xo": "mock.auth.token"
+        }
+        client = MeeshoClient(account_data=mock_account, auto_refresh=False)
+        comparator = ProductPricingComparator(client=client)
+
+        with patch("pricing_comparator.get_product_info") as mock_info, \
+             patch("pricing_comparator.check_shipping_charges_fast") as mock_ship, \
+             patch("fod_classifier.fetch_live_fod") as mock_fod:
+
+            mock_info.return_value = {
+                "name": "Special Cotton Saree",
+                "price": 299.0,
+                "supplier_id": 99,
+                "variations": [{"variation_id": 1, "variation_name": "Free Size", "in_stock": True}]
+            }
+            mock_ship.return_value = {
+                "pincode": "500092",
+                "serviceable": True,
+                "charges": 0.0,
+                "expected_delivery": "2 days",
+                "account_specific": True
+            }
+            mock_fod.return_value = MagicMock(
+                advertised_tier="TIER_50",
+                advertised_amount=50.0,
+                offer_bucket="HIGH"
+            )
+
+            report = comparator.compare_product_pricing(product_url_or_id="624039638", pincodes=["500092"])
+            self.assertIsNotNone(report.account_context)
+            self.assertEqual(report.account_context["mobile"], "8869049741")
+            self.assertEqual(report.account_context["user_id"], 492252136)
+            self.assertEqual(report.account_context["fod_tier"], "TIER_50")
+            self.assertEqual(report.account_context["fod_discount"], 50.0)
+            self.assertTrue(report.account_context["account_verified"])
+
+            res = report.results[0]
+            self.assertEqual(res.status, ComparisonStatus.VERIFIED_AVAILABLE)
+            self.assertEqual(res.account_identifier, "8869049741")
+            self.assertTrue(res.account_verified)
+            self.assertEqual(res.account_discount, 50.0)
+            self.assertEqual(res.final_payable_price, 249.0)  # 299 + 0 - 50
+
+    def test_web_ui_api_endpoints_decoupled_and_classification_downloads(self):
+        """Verifies Web UI API endpoints for decoupled seeding and classification downloads."""
+        import web_ui
+        test_client = web_ui.app.test_client()
+
+        sample_accounts = [
+            {"user_id": 7001, "mobile": "9999907001", "xo": "mock.xo.1", "orders": []},
+            {"user_id": 7002, "mobile": "9999907002", "xo": "mock.xo.2", "orders": [{"id": 1}]}
+        ]
+
+        # 1. Test /api/classify-accounts returns fresh_accounts, used_accounts, combined_accounts
+        resp = test_client.post("/api/classify-accounts", json={"source": sample_accounts, "live": False})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["fresh_count"], 1)
+        self.assertEqual(data["used_count"], 1)
+        self.assertEqual(len(data["fresh_accounts"]), 1)
+        self.assertEqual(data["fresh_accounts"][0]["user_id"], 7001)
+        self.assertEqual(len(data["used_accounts"]), 1)
+        self.assertEqual(data["used_accounts"][0]["user_id"], 7002)
+        self.assertEqual(len(data["combined_accounts"]), 2)
+
+        # 2. Test /api/run-assignment with mode="cart_only"
+        cart_resp = test_client.post("/api/run-assignment", json={
+            "accounts_source": sample_accounts,
+            "mode": "cart_only",
+            "cart_set_name": "Cart Set 1",
+            "products_source": ["624039638", "513926576"],
+            "seed": 42,
+            "count": 1,
+            "dry_run": True
+        })
+        self.assertEqual(cart_resp.status_code, 200)
+        cart_data = cart_resp.get_json()
+        self.assertTrue(cart_data["success"])
+        self.assertEqual(cart_data["mode"], "cart_only")
+        self.assertEqual(cart_data["report"]["total_accounts"], 2)
+
+        # 3. Test /api/run-assignment with mode="address_only"
+        addr_resp = test_client.post("/api/run-assignment", json={
+            "accounts_source": sample_accounts,
+            "mode": "address_only",
+            "address_set_name": "Address Set 1",
+            "addresses_source": [{
+                "name": "Custom",
+                "mobile": "9182777959",
+                "address_line_1": "Flat 1",
+                "city": "Hyderabad",
+                "state": "Telangana",
+                "pin": "500092"
+            }],
+            "seed": 42,
+            "dry_run": True
+        })
+        self.assertEqual(addr_resp.status_code, 200)
+        addr_data = addr_resp.get_json()
+        self.assertTrue(addr_data["success"])
+        self.assertEqual(addr_data["mode"], "address_only")
+
 
 if __name__ == "__main__":
     unittest.main()

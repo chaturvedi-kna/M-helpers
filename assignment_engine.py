@@ -77,6 +77,9 @@ class AssignmentRuleConfig:
     address_strategy: str = "round_robin"   # 'round_robin', 'random_with_replacement', 'unique'
     allow_product_reuse: bool = True
     price_type: str = PRICE_TYPE_BASIC
+    mode: str = "both"                      # 'both', 'cart_only', 'address_only'
+    cart_set_name: str = "Cart Set 1"
+    address_set_name: str = "Address Set 1"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -87,8 +90,8 @@ class AccountAssignment:
     """Assignment plan for a single account."""
     account_id: str
     account_source: str
-    assigned_products: List[Dict[str, Any]]
-    assigned_address: Dict[str, Any]
+    assigned_products: List[Dict[str, Any]] = field(default_factory=list)
+    assigned_address: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -133,61 +136,73 @@ class AssignmentPlanner:
 
     def create_plan(
         self,
-        product_refs: List[Any],
-        addresses: List[Dict[str, Any]],
-        account_identifiers_or_files: List[Union[str, Path, Dict[str, Any]]]
+        product_refs: Optional[List[Any]] = None,
+        addresses: Optional[List[Dict[str, Any]]] = None,
+        account_identifiers_or_files: List[Union[str, Path, Dict[str, Any]]] = None
     ) -> AssignmentPlan:
         """
         Validates inputs and produces a reproducible, deterministic AssignmentPlan.
+        Supports decoupled modes: 'cart_only', 'address_only', and 'both'.
         """
         if self.config.random_seed is not None:
             rng = random.Random(self.config.random_seed)
         else:
             rng = random.Random()
 
+        mode = getattr(self.config, "mode", "both") or "both"
+        need_cart = mode in ("cart_only", "both")
+        need_address = mode in ("address_only", "both")
+
         # 1. Validate Product References
         valid_products: List[Dict[str, Any]] = []
         invalid_products: List[Dict[str, Any]] = []
 
-        for p_ref in product_refs:
-            ok, pid, err = validate_product_reference(p_ref)
-            if ok:
-                valid_products.append({"product_id": pid, "original_ref": str(p_ref)})
-            else:
-                invalid_products.append({"original_ref": str(p_ref), "error": err})
+        if need_cart:
+            if not product_refs:
+                raise ValueError(f"No products provided for Cart addition ({self.config.cart_set_name}). Please specify input products.")
+            for p_ref in product_refs:
+                ok, pid, err = validate_product_reference(p_ref)
+                if ok:
+                    valid_products.append({"product_id": pid, "original_ref": str(p_ref)})
+                else:
+                    invalid_products.append({"original_ref": str(p_ref), "error": err})
+            if not valid_products:
+                raise ValueError(f"No valid products available in {self.config.cart_set_name} after validation. Errors: {invalid_products}")
 
         # 2. Validate Addresses
         valid_addresses: List[Dict[str, Any]] = []
         invalid_addresses: List[Dict[str, Any]] = []
 
-        for addr in addresses:
-            ok, errs = validate_test_address(addr)
-            if ok:
-                valid_addresses.append(copy.deepcopy(addr))
-            else:
-                invalid_addresses.append({"address": addr, "errors": errs})
+        if need_address:
+            if not addresses:
+                raise ValueError(f"No addresses provided for Address assignment ({self.config.address_set_name}). Please specify input addresses.")
+            for addr in addresses:
+                ok, errs = validate_test_address(addr)
+                if ok:
+                    valid_addresses.append(copy.deepcopy(addr))
+                else:
+                    invalid_addresses.append({"address": addr, "errors": errs})
+            if not valid_addresses:
+                raise ValueError(f"No valid addresses available in {self.config.address_set_name} after validation. Errors: {invalid_addresses}")
 
         # 3. Validate Accounts list
         if not account_identifiers_or_files:
             raise ValueError("No accounts provided for assignment.")
 
-        if not valid_products:
-            raise ValueError(f"No valid products available after validation. Errors: {invalid_products}")
-
-        if not valid_addresses:
-            raise ValueError(f"No valid addresses available after validation. Errors: {invalid_addresses}")
-
         validation_report = {
-            "total_products_submitted": len(product_refs),
+            "mode": mode,
+            "cart_set_name": self.config.cart_set_name,
+            "address_set_name": self.config.address_set_name,
+            "total_products_submitted": len(product_refs or []),
             "valid_products_count": len(valid_products),
             "invalid_products": invalid_products,
-            "total_addresses_submitted": len(addresses),
+            "total_addresses_submitted": len(addresses or []),
             "valid_addresses_count": len(valid_addresses),
             "invalid_addresses": invalid_addresses
         }
 
         # 4. Generate Assignments
-        k_prod = min(self.config.products_per_account, len(valid_products))
+        k_prod = min(self.config.products_per_account, len(valid_products)) if valid_products else 0
         assignments: List[AccountAssignment] = []
 
         for idx, acc in enumerate(account_identifiers_or_files):
@@ -205,24 +220,27 @@ class AssignmentPlanner:
                 acc_id = f"account_{idx}"
                 acc_source = str(acc)
 
-            # Assign products
-            if self.config.allow_product_reuse:
-                assigned_prods = rng.sample(valid_products, k_prod)
-            else:
-                # Unique allocation across accounts if enough products
-                start_p = (idx * k_prod) % len(valid_products)
-                assigned_prods = [valid_products[(start_p + j) % len(valid_products)] for j in range(k_prod)]
-
-            # Assign address based on strategy
-            if self.config.address_strategy == "round_robin":
-                assigned_addr = valid_addresses[idx % len(valid_addresses)]
-            elif self.config.address_strategy == "unique":
-                if idx < len(valid_addresses):
-                    assigned_addr = valid_addresses[idx]
+            # Assign products if cart addition enabled
+            assigned_prods = []
+            if need_cart and valid_products:
+                if self.config.allow_product_reuse:
+                    assigned_prods = rng.sample(valid_products, k_prod)
                 else:
+                    start_p = (idx * k_prod) % len(valid_products)
+                    assigned_prods = [valid_products[(start_p + j) % len(valid_products)] for j in range(k_prod)]
+
+            # Assign address if address assignment enabled
+            assigned_addr = None
+            if need_address and valid_addresses:
+                if self.config.address_strategy == "round_robin":
                     assigned_addr = valid_addresses[idx % len(valid_addresses)]
-            else:  # random_with_replacement
-                assigned_addr = rng.choice(valid_addresses)
+                elif self.config.address_strategy == "unique":
+                    if idx < len(valid_addresses):
+                        assigned_addr = valid_addresses[idx]
+                    else:
+                        assigned_addr = valid_addresses[idx % len(valid_addresses)]
+                else:  # random_with_replacement
+                    assigned_addr = rng.choice(valid_addresses)
 
             assignments.append(
                 AccountAssignment(
@@ -272,9 +290,9 @@ class AssignmentExecutor:
             item_res = {
                 "account_id": acc_id,
                 "account_source": assignment.account_source,
-                "assigned_products_count": len(assignment.assigned_products),
-                "assigned_products": assignment.assigned_products,
-                "assigned_address_pincode": assignment.assigned_address.get("pin"),
+                "assigned_products_count": len(assignment.assigned_products or []),
+                "assigned_products": assignment.assigned_products or [],
+                "assigned_address_pincode": assignment.assigned_address.get("pin") if assignment.assigned_address else None,
                 "status": "SIMULATED_SUCCESS" if dry_run else "PENDING"
             }
 
@@ -287,42 +305,45 @@ class AssignmentExecutor:
                     continue
 
                 try:
-                    # Execute address addition
-                    print(f"[*] Account {acc_id}: Adding address at pincode {assignment.assigned_address.get('pin')}...", flush=True)
-                    addr_res = add_address(client, assignment.assigned_address)
-                    item_res["registered_address_id"] = addr_res.get("id")
-                    print(f"[+] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
+                    # Execute address addition if assigned
+                    if assignment.assigned_address:
+                        print(f"[*] Account {acc_id}: Adding address at pincode {assignment.assigned_address.get('pin')}...", flush=True)
+                        addr_res = add_address(client, assignment.assigned_address)
+                        item_res["registered_address_id"] = addr_res.get("id")
+                        print(f"[+] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
+                    else:
+                        item_res["registered_address_id"] = None
 
-                    # Execute product additions
+                    # Execute product additions if assigned
                     added_prods = []
-                    for p in assignment.assigned_products:
-                        p_id = p["product_id"]
-                        print(f"[*] Account {acc_id}: Fetching product info for {p_id}...", flush=True)
-                        try:
-                            info = get_product_info(client, p_id)
-                            in_stock = [v for v in info.get("variations", []) if v.get("in_stock")]
-                            chosen_var = in_stock[0] if in_stock else info["variations"][0]
+                    if assignment.assigned_products:
+                        for p in assignment.assigned_products:
+                            p_id = p["product_id"]
+                            print(f"[*] Account {acc_id}: Fetching product info for {p_id}...", flush=True)
+                            try:
+                                info = get_product_info(client, p_id)
+                                in_stock = [v for v in info.get("variations", []) if v.get("in_stock")]
+                                chosen_var = in_stock[0] if in_stock else (info["variations"][0] if info.get("variations") else None)
 
-                            print(f"[*] Account {acc_id}: Adding product {p_id} to cart...", flush=True)
-                            cart_res = add_product_to_cart(
-                                client=client,
-                                product_id=p_id,
-                                supplier_id=info["supplier_id"],
-                                variation_id=chosen_var["variation_id"],
-                                variation_name=chosen_var["variation_name"],
-                                quantity=1,
-                                price_type=self.plan.config.get("price_type", PRICE_TYPE_BASIC)
-                            )
-                            cart_ok = bool(cart_res.get("success", True))
-                        except Exception as pe:
-                            print(f"[-] Account {acc_id}: Product {p_id} cart addition warning: {pe}", flush=True)
-                            cart_ok = False
+                                print(f"[*] Account {acc_id}: Adding product {p_id} to cart...", flush=True)
+                                cart_res = add_product_to_cart(
+                                    client=client,
+                                    product_id=p_id,
+                                    supplier_id=info["supplier_id"],
+                                    variation_id=chosen_var["variation_id"] if chosen_var else 1,
+                                    variation_name=chosen_var["variation_name"] if chosen_var else "Free Size",
+                                    quantity=1,
+                                    price_type=self.plan.config.get("price_type", PRICE_TYPE_BASIC)
+                                )
+                                cart_ok = bool(cart_res.get("success", True))
+                            except Exception as pe:
+                                print(f"[-] Account {acc_id}: Product {p_id} cart addition warning: {pe}", flush=True)
+                                cart_ok = False
 
-                        added_prods.append({
-                            "product_id": p_id,
-                            "cart_success": cart_ok
-                        })
-
+                            added_prods.append({
+                                "product_id": p_id,
+                                "cart_success": cart_ok
+                            })
                     item_res["added_products"] = added_prods
                     item_res["status"] = "SUCCESS"
                     print(f"[+] Account {acc_id}: Execution completed successfully!", flush=True)
@@ -337,6 +358,9 @@ class AssignmentExecutor:
 
         return {
             "mode": "DRY_RUN" if dry_run else "LIVE_EXECUTION",
+            "operation_mode": self.plan.config.get("mode", "both") if self.plan.config else "both",
+            "cart_set_name": self.plan.config.get("cart_set_name", "Cart Set 1") if self.plan.config else "Cart Set 1",
+            "address_set_name": self.plan.config.get("address_set_name", "Address Set 1") if self.plan.config else "Address Set 1",
             "seed": self.plan.seed,
             "total_accounts": len(results),
             "results": results
@@ -399,9 +423,9 @@ DEFAULT_ADDRESSES = [
 
 
 def run_bulk_assignment_from_source(
-    products_source: Any,
-    addresses_source: Any,
-    accounts_source: Any,
+    products_source: Any = None,
+    addresses_source: Any = None,
+    accounts_source: Any = None,
     config: Optional[AssignmentRuleConfig] = None,
     dry_run: bool = True,
     output_dir: Optional[Union[str, Path]] = None,
@@ -410,49 +434,70 @@ def run_bulk_assignment_from_source(
 ) -> Dict[str, Any]:
     """
     Runs deterministic bulk assignment supporting:
+    - Decoupled execution: cart_only, address_only, or both.
+    - User-configured sets (e.g. Cart Set 1, Address Set 1) without silent defaults.
     - Ingesting accounts from single file, directory, merged array, or JSONL.
     - Exporting outputs as 1-by-1 .txt files per account or combined JSON.
-    - Built-in safe fallbacks for products and addresses when files are absent.
     """
     from data_io import load_accounts_from_source, export_categorized_results
 
-    # Load products
-    prods = None
-    if not products_source or products_source == "sample_products.json":
-        if Path("sample_products.json").is_file():
+    cfg = config or AssignmentRuleConfig()
+    mode = getattr(cfg, "mode", "both") or "both"
+    need_cart = mode in ("cart_only", "both")
+    need_address = mode in ("address_only", "both")
+
+    # Load products if needed
+    prods = []
+    if need_cart:
+        if not products_source:
+            raise ValueError(f"No products provided for Cart addition ({cfg.cart_set_name}). Please input products.")
+        if products_source == "sample_products.json" and Path("sample_products.json").is_file():
             with open("sample_products.json", "r", encoding="utf-8") as f:
                 prods = json.load(f)
-        else:
+        elif isinstance(products_source, (str, Path)) and Path(str(products_source)).is_file():
+            with open(str(products_source), "r", encoding="utf-8") as f:
+                prods = json.load(f)
+        elif isinstance(products_source, (str, Path)) and (str(products_source).endswith(".json") or str(products_source).endswith(".txt")):
+            # Fallback for missing file references
             prods = DEFAULT_PRODUCTS
-    elif isinstance(products_source, (str, Path)) and Path(str(products_source)).is_file():
-        with open(str(products_source), "r", encoding="utf-8") as f:
-            prods = json.load(f)
-    elif isinstance(products_source, list):
-        prods = list(products_source)
-    elif isinstance(products_source, str) and (products_source.strip().startswith("[") or products_source.strip().startswith("{")):
-        prods = json.loads(products_source)
-    else:
-        prods = DEFAULT_PRODUCTS
+        elif isinstance(products_source, list):
+            prods = list(products_source)
+        elif isinstance(products_source, str) and (products_source.strip().startswith("[") or products_source.strip().startswith("{")):
+            parsed = json.loads(products_source)
+            prods = parsed if isinstance(parsed, list) else [parsed]
+        elif isinstance(products_source, str):
+            prods = [p.strip() for p in re.split(r"[\n,]+", products_source) if p.strip()]
+        else:
+            prods = list(products_source)
 
-    # Load addresses
-    addrs = None
-    if not addresses_source or addresses_source == "sample_addresses.json":
-        if Path("sample_addresses.json").is_file():
+    # Load addresses if needed
+    addrs = []
+    if need_address:
+        if not addresses_source:
+            raise ValueError(f"No addresses provided for Address assignment ({cfg.address_set_name}). Please input address details.")
+        if addresses_source == "sample_addresses.json" and Path("sample_addresses.json").is_file():
             with open("sample_addresses.json", "r", encoding="utf-8") as f:
                 addrs = json.load(f)
-        else:
+        elif isinstance(addresses_source, (str, Path)) and Path(str(addresses_source)).is_file():
+            with open(str(addresses_source), "r", encoding="utf-8") as f:
+                addrs = json.load(f)
+        elif isinstance(addresses_source, (str, Path)) and (str(addresses_source).endswith(".json") or str(addresses_source).endswith(".txt")):
+            # Fallback for missing file references
             addrs = DEFAULT_ADDRESSES
-    elif isinstance(addresses_source, (str, Path)) and Path(str(addresses_source)).is_file():
-        with open(str(addresses_source), "r", encoding="utf-8") as f:
-            addrs = json.load(f)
-    elif isinstance(addresses_source, list):
-        addrs = list(addresses_source)
-    elif isinstance(addresses_source, str) and (addresses_source.strip().startswith("[") or addresses_source.strip().startswith("{")):
-        addrs = json.loads(addresses_source)
-    else:
-        addrs = DEFAULT_ADDRESSES
+        elif isinstance(addresses_source, list):
+            addrs = list(addresses_source)
+        elif isinstance(addresses_source, dict):
+            addrs = [addresses_source]
+        elif isinstance(addresses_source, str) and (addresses_source.strip().startswith("[") or addresses_source.strip().startswith("{")):
+            parsed = json.loads(addresses_source)
+            addrs = parsed if isinstance(parsed, list) else [parsed]
+        else:
+            addrs = list(addresses_source)
 
     # Load accounts with strict operator blacklist filtering
+    if not accounts_source:
+        raise ValueError("No target accounts provided for assignment.")
+
     accounts = load_accounts_from_source(accounts_source)
     account_identifiers = []
     effective_client_map = dict(client_map) if client_map else {}
@@ -475,7 +520,7 @@ def run_bulk_assignment_from_source(
                 except Exception as ce:
                     logger.warning(f"Could not initialize MeeshoClient for account {aid}: {ce}")
 
-    planner = AssignmentPlanner(config or AssignmentRuleConfig())
+    planner = AssignmentPlanner(cfg)
     plan = planner.create_plan(product_refs=prods, addresses=addrs, account_identifiers_or_files=account_identifiers)
     executor = AssignmentExecutor(plan)
     exec_result = executor.execute_plan(account_client_map=effective_client_map, dry_run=dry_run)

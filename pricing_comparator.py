@@ -108,10 +108,13 @@ class PriceBreakdown:
     displayed_product_price: float = 0.0
     delivery_charges: float = 0.0
     eligible_discounts: float = 0.0
+    account_discount: float = 0.0
     payment_method_discounts: float = 0.0
     final_payable_price: float = 0.0
     upi_verified_eligible: bool = False
     delivery_days: Optional[str] = None
+    account_identifier: Optional[str] = None
+    account_verified: bool = False
     error_message: Optional[str] = None
     raw_details: Dict[str, Any] = field(default_factory=dict)
 
@@ -127,6 +130,7 @@ class PricingComparisonReport:
     product_id: int
     product_name: Optional[str]
     tested_pincodes: List[str]
+    account_context: Optional[Dict[str, Any]] = None
     results: List[PriceBreakdown] = field(default_factory=list)
     cheapest_verified_option: Optional[PriceBreakdown] = None
     max_savings_vs_worst: float = 0.0
@@ -136,6 +140,7 @@ class PricingComparisonReport:
             "product_id": self.product_id,
             "product_name": self.product_name,
             "tested_pincodes": self.tested_pincodes,
+            "account_context": self.account_context,
             "cheapest_verified_option": self.cheapest_verified_option.to_dict() if self.cheapest_verified_option else None,
             "max_savings_vs_worst": self.max_savings_vs_worst,
             "results": [r.to_dict() for r in self.results]
@@ -283,7 +288,40 @@ class ProductPricingComparator:
                 max_savings_vs_worst=0.0
             )
 
-        # 2. Evaluate pricing for each pincode (concurrently for fast performance)
+        # 2. Extract account context & live promotional discounts
+        acc_data = getattr(self.client, "account_data", {}) or {}
+        user_id = str(acc_data.get("user_id") or "")
+        mobile = str(acc_data.get("mobile") or acc_data.get("phone") or "")
+        acc_ident = mobile or user_id or "Anonymous"
+
+        fod_discount = 0.0
+        fod_tier = None
+        offer_bucket = None
+        try:
+            from fod_classifier import fetch_live_fod
+            fod_record = fetch_live_fod(client=self.client, account_data=acc_data)
+            if fod_record:
+                fod_tier = str(fod_record.advertised_tier or "")
+                offer_bucket = getattr(fod_record, "offer_bucket", None)
+                if fod_record.advertised_amount:
+                    fod_discount = float(fod_record.advertised_amount)
+        except Exception as fe:
+            logger.debug(f"Live FOD query note in pricing: {fe}")
+
+        account_context = {
+            "account_id": user_id or None,
+            "user_id": acc_data.get("user_id"),
+            "mobile": mobile or None,
+            "account_identifier": acc_ident,
+            "is_authenticated": bool(acc_data.get("xo")),
+            "fod_tier": fod_tier,
+            "fod_discount": fod_discount,
+            "offer_bucket": offer_bucket,
+            "account_status": "Account Session Active",
+            "account_verified": bool(acc_data.get("xo") or user_id or mobile)
+        }
+
+        # 3. Evaluate pricing for each pincode (concurrently for fast performance)
         from concurrent.futures import ThreadPoolExecutor
 
         def _eval_pin(pin: str) -> PriceBreakdown:
@@ -291,7 +329,9 @@ class ProductPricingComparator:
                 product_id=product_id,
                 pincode=pin,
                 supplier_id=supplier_id,
-                base_price=base_price
+                base_price=base_price,
+                fod_discount=fod_discount,
+                account_ident=acc_ident
             )
 
         if len(candidate_pins) > 1:
@@ -300,7 +340,7 @@ class ProductPricingComparator:
         else:
             results = [_eval_pin(p) for p in candidate_pins]
 
-        # 3. Rank results by final payable price (verified available first)
+        # 4. Rank results by final payable price (verified available first)
         verified = [r for r in results if r.status == ComparisonStatus.VERIFIED_AVAILABLE]
         non_verified = [r for r in results if r.status != ComparisonStatus.VERIFIED_AVAILABLE]
 
@@ -315,6 +355,7 @@ class ProductPricingComparator:
             product_id=product_id,
             product_name=product_name,
             tested_pincodes=candidate_pins,
+            account_context=account_context,
             results=ranked_results,
             cheapest_verified_option=cheapest,
             max_savings_vs_worst=max(0.0, savings)
@@ -328,7 +369,9 @@ class ProductPricingComparator:
         base_price: float,
         variation_id: Optional[int] = None,
         variation_name: Optional[str] = None,
-        price_type: Optional[str] = None
+        price_type: Optional[str] = None,
+        fod_discount: float = 0.0,
+        account_ident: Optional[str] = None
     ) -> PriceBreakdown:
         """Evaluates pricing breakdown for one pincode via direct shipping charge quote."""
         pin_str = str(pincode).strip()
@@ -374,7 +417,8 @@ class ProductPricingComparator:
 
         delivery_charges = float(ship_info.get("charges") or 0.0)
         expected_date = ship_info.get("estimated_date") or ship_info.get("expected_delivery")
-        final_payable = base_price + delivery_charges
+        applied_account_discount = min(base_price, fod_discount) if fod_discount > 0 else 0.0
+        final_payable = max(0.0, base_price + delivery_charges - applied_account_discount)
 
         return PriceBreakdown(
             product_id=product_id,
@@ -385,10 +429,13 @@ class ProductPricingComparator:
             zone=zone,
             displayed_product_price=round(base_price, 2),
             delivery_charges=round(delivery_charges, 2),
-            eligible_discounts=0.0,
+            eligible_discounts=round(applied_account_discount, 2),
+            account_discount=round(applied_account_discount, 2),
             payment_method_discounts=0.0,
             final_payable_price=round(final_payable, 2),
             upi_verified_eligible=False,
             delivery_days=expected_date,
+            account_identifier=account_ident,
+            account_verified=bool(ship_info.get("account_specific", True)),
             raw_details=ship_info
         )

@@ -337,6 +337,10 @@ HTML_TEMPLATE = """
               </button>
             </div>
           </div>
+
+          <!-- Account Context Verification Banner -->
+          <div id="pricing-account-context-box" class="mb-4"></div>
+
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm">
               <thead class="text-xs uppercase bg-slate-950 text-slate-400 border-b border-slate-800">
@@ -346,9 +350,9 @@ HTML_TEMPLATE = """
                   <th class="py-2.5 px-3">City / State</th>
                   <th class="py-2.5 px-3">Base Price</th>
                   <th class="py-2.5 px-3">Delivery</th>
-                  <th class="py-2.5 px-3">UPI Discount</th>
+                  <th class="py-2.5 px-3">Account Discount</th>
                   <th class="py-2.5 px-3 font-bold text-rose-400">Final Price</th>
-                  <th class="py-2.5 px-3">Status</th>
+                  <th class="py-2.5 px-3">Account Verification</th>
                 </tr>
               </thead>
               <tbody id="pricing-table-body" class="divide-y divide-slate-800 font-mono text-xs"></tbody>
@@ -533,7 +537,7 @@ HTML_TEMPLATE = """
       </section>
 
       <!-- ======================================================== -->
-      <!-- TAB 4: BULK ASSIGNMENT                                   -->
+      <!-- TAB 4: BULK SEEDING (DECOUPLED CART & ADDRESS)           -->
       <!-- ======================================================== -->
       <section id="tab-assignment" class="space-y-6 hidden">
         <div class="card p-6">
@@ -541,12 +545,12 @@ HTML_TEMPLATE = """
             <div>
               <h2 class="text-base font-semibold flex items-center space-x-2 text-white">
                 <i class="fa-solid fa-cubes-stacked text-purple-400"></i>
-                <span>Bulk Product & Address Deterministic Assignment</span>
+                <span>Bulk Seeding (Decoupled Cart Addition & Address Assignment)</span>
               </h2>
-              <p class="text-xs text-slate-400 mt-1">Assigns configurable product and delivery address pools across test accounts with a reproducible random seed.</p>
+              <p class="text-xs text-slate-400 mt-1">Configure user-defined Cart Sets and Address Sets independently. No silent defaults: assign products to cart, assign addresses, or both.</p>
             </div>
             <span class="px-2.5 py-1 rounded-full text-[11px] font-mono bg-purple-950 text-purple-400 border border-purple-800">
-              Deterministic Plan
+              Decoupled Seeding
             </span>
           </div>
 
@@ -569,38 +573,143 @@ HTML_TEMPLATE = """
               <input type="file" id="assign-file-input" multiple accept=".json,.jsonl,.txt" onchange="handleMultipleAccountFiles(this, 'assign')" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-purple-300 hover:file:bg-slate-700 cursor-pointer">
             </div>
             <div id="assign-box-paste" class="hidden">
-              <textarea id="assign-paste-textarea" rows="4" placeholder="[{...}, {...}] or {...}\n{...}" oninput="handlePastedMultipleAccounts('assign')" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
+              <textarea id="assign-paste-textarea" rows="3" placeholder="[{...}, {...}] or {...}\n{...}" oninput="handlePastedMultipleAccounts('assign')" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
             </div>
             <div id="assign-account-status" class="mt-2 text-xs hidden"></div>
           </div>
 
-          <!-- Configuration & Rules -->
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-            <div>
-              <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Random Seed</label>
-              <input type="number" id="assign-seed" value="42" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
-            </div>
-            <div>
-              <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Products / Account</label>
-              <input type="number" id="assign-count" value="2" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
-            </div>
-            <div class="md:col-span-2 flex items-center pt-5">
-              <label class="flex items-center space-x-2 text-sm text-slate-300 cursor-pointer">
-                <input type="checkbox" id="assign-dryrun" checked class="w-4 h-4 text-purple-600 rounded bg-slate-950 border-slate-700">
-                <span class="font-medium">Dry-Run Simulation Mode (Safe plan generation without API cart mutations)</span>
+          <!-- Operation Mode Selection -->
+          <div class="p-4 bg-slate-950 rounded-xl border border-slate-800">
+            <label class="block text-xs font-semibold uppercase text-slate-300 mb-2">Seeding Operation Mode</label>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label class="flex items-center space-x-2 p-3 bg-slate-900 rounded-lg border border-slate-700 cursor-pointer hover:border-purple-500 transition">
+                <input type="radio" name="seeding-mode" value="cart_only" onchange="toggleSeedingMode()" class="text-purple-500">
+                <div>
+                  <div class="text-xs font-semibold text-white flex items-center gap-1.5"><i class="fa-solid fa-cart-shopping text-emerald-400"></i> Cart Addition Only</div>
+                  <div class="text-[11px] text-slate-400">Add products to cart only (skips address)</div>
+                </div>
+              </label>
+              <label class="flex items-center space-x-2 p-3 bg-slate-900 rounded-lg border border-slate-700 cursor-pointer hover:border-purple-500 transition">
+                <input type="radio" name="seeding-mode" value="address_only" onchange="toggleSeedingMode()" class="text-purple-500">
+                <div>
+                  <div class="text-xs font-semibold text-white flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-blue-400"></i> Address Assignment Only</div>
+                  <div class="text-[11px] text-slate-400">Assign delivery address only (skips cart)</div>
+                </div>
+              </label>
+              <label class="flex items-center space-x-2 p-3 bg-slate-900 rounded-lg border border-purple-600 bg-purple-950/20 cursor-pointer hover:border-purple-500 transition">
+                <input type="radio" name="seeding-mode" value="both" checked onchange="toggleSeedingMode()" class="text-purple-500">
+                <div>
+                  <div class="text-xs font-semibold text-white flex items-center gap-1.5"><i class="fa-solid fa-arrows-split-up-and-left text-purple-400"></i> Both (Cart + Address)</div>
+                  <div class="text-[11px] text-slate-400">Run both cart seeding and address assignment</div>
+                </div>
               </label>
             </div>
           </div>
 
-          <div class="mt-5 flex items-center space-x-4">
-            <button onclick="runAssignment()" id="btn-run-assign" class="bg-purple-600 hover:bg-purple-500 text-white font-medium px-4 py-2 rounded-lg text-sm transition flex items-center space-x-2">
-              <i class="fa-solid fa-play"></i>
-              <span>Generate Assignment Plan</span>
-            </button>
-            <span id="assign-spinner" class="hidden text-sm text-slate-400 flex items-center space-x-2">
-              <i class="fa-solid fa-circle-notch fa-spin text-purple-500"></i>
-              <span>Generating deterministic plan...</span>
-            </span>
+          <!-- Configuration Boxes (User Input without default fallbacks) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Box A: Cart Set Configuration -->
+            <div id="cart-set-container" class="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div class="flex items-center space-x-2">
+                  <i class="fa-solid fa-cart-plus text-emerald-400"></i>
+                  <span class="text-xs font-semibold uppercase text-slate-200">Cart Set Configuration</span>
+                </div>
+                <input type="text" id="assign-cart-name" value="Cart Set 1" class="bg-slate-900 border border-slate-700 text-xs px-2 py-1 rounded text-purple-300 font-mono w-28 text-right focus:outline-none">
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">User Products (Enter Product IDs or URLs, 1 per line or comma-separated):</label>
+                <textarea id="assign-products-input" rows="3" placeholder="624039638&#10;513926576&#10;545926880" oninput="updateCartCounter()" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
+                <div class="flex items-center justify-between text-[11px] text-slate-400 mt-1">
+                  <span>Items in Set: <strong id="cart-items-count" class="text-emerald-400">0</strong></span>
+                  <span>No default products used</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label class="block text-[11px] text-slate-400 mb-1">Products / Account</label>
+                  <input type="number" id="assign-count" value="1" min="1" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white">
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-400 mb-1">Allocation</label>
+                  <select id="assign-prod-strategy" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white">
+                    <option value="allow_reuse" selected>Random with replacement</option>
+                    <option value="unique">Unique allocation</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Box B: Address Set Configuration -->
+            <div id="address-set-container" class="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div class="flex items-center space-x-2">
+                  <i class="fa-solid fa-map-location-dot text-blue-400"></i>
+                  <span class="text-xs font-semibold uppercase text-slate-200">Address Set Configuration</span>
+                </div>
+                <input type="text" id="assign-address-name" value="Address Set 1" class="bg-slate-900 border border-slate-700 text-xs px-2 py-1 rounded text-purple-300 font-mono w-32 text-right focus:outline-none">
+              </div>
+
+              <!-- Address Mode: Quick Form vs JSON -->
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-400">Address Input:</span>
+                <div class="flex items-center gap-2">
+                  <label class="cursor-pointer text-slate-300"><input type="radio" name="addr-entry-mode" value="form" checked onchange="toggleAddrEntryMode()" class="text-purple-500"> Quick Form</label>
+                  <label class="cursor-pointer text-slate-300"><input type="radio" name="addr-entry-mode" value="json" onchange="toggleAddrEntryMode()" class="text-purple-500"> Paste JSON</label>
+                </div>
+              </div>
+
+              <div id="addr-box-form" class="space-y-2">
+                <div class="grid grid-cols-2 gap-2">
+                  <input type="text" id="addr-name" placeholder="Full Name (e.g. K V Sharma)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input type="text" id="addr-mobile" placeholder="Mobile (e.g. 9182777959)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                </div>
+                <input type="text" id="addr-line1" placeholder="Address Line 1 (Flat, House No, Building)" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                <div class="grid grid-cols-3 gap-2">
+                  <input type="text" id="addr-city" placeholder="City" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input type="text" id="addr-state" placeholder="State" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input type="text" id="addr-pin" placeholder="Pincode (6 digits)" maxlength="6" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white font-mono">
+                </div>
+              </div>
+
+              <div id="addr-box-json" class="hidden">
+                <textarea id="assign-address-json" rows="3" placeholder='[{"name": "...", "mobile": "...", "address_line_1": "...", "city": "...", "state": "...", "pin": "500092"}]' class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
+              </div>
+
+              <div class="flex items-center justify-between pt-1">
+                <label class="text-[11px] text-slate-400">Strategy:</label>
+                <select id="assign-addr-strategy" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+                  <option value="round_robin" selected>Assign Address to Accounts (Round Robin)</option>
+                  <option value="unique">Assign Unique Address per Account</option>
+                  <option value="random_with_replacement">Random with replacement</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Common Execution Controls -->
+          <div class="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-950 rounded-xl border border-slate-800">
+            <div class="flex items-center space-x-4 text-xs">
+              <div>
+                <label class="block text-slate-400 mb-1">Random Seed</label>
+                <input type="number" id="assign-seed" value="42" class="w-20 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white">
+              </div>
+              <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer pt-3">
+                <input type="checkbox" id="assign-dryrun" checked class="w-4 h-4 text-purple-600 rounded bg-slate-900 border-slate-700">
+                <span class="font-medium">Dry-Run Simulation Mode (Safe plan without live cart mutations)</span>
+              </label>
+            </div>
+
+            <div class="flex items-center space-x-3">
+              <button onclick="runAssignment()" id="btn-run-assign" class="bg-purple-600 hover:bg-purple-500 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition flex items-center space-x-2 shadow-lg shadow-purple-950">
+                <i class="fa-solid fa-play"></i>
+                <span id="assign-btn-text">Run Bulk Seeding (Cart + Address)</span>
+              </button>
+              <span id="assign-spinner" class="hidden text-sm text-slate-400 flex items-center space-x-2">
+                <i class="fa-solid fa-circle-notch fa-spin text-purple-500"></i>
+                <span>Executing decoupled seeding plan...</span>
+              </span>
+            </div>
           </div>
 
           <div id="assignment-results-card" class="mt-5 hidden"></div>
@@ -993,10 +1102,33 @@ HTML_TEMPLATE = """
           savingsPill.classList.add('hidden');
         }
 
+        // Account Context & Verification Display
+        const ctxBox = document.getElementById('pricing-account-context-box');
+        if (rep.account_context) {
+          const ac = rep.account_context;
+          const userLabel = ac.mobile || ac.user_id || ac.account_identifier || 'Target Account';
+          const fodBadge = ac.fod_tier ? `<span class="px-2 py-0.5 rounded text-xs bg-amber-950 text-amber-300 border border-amber-800 font-semibold"><i class="fa-solid fa-gift mr-1"></i>FOD: ${ac.fod_tier} (₹${ac.fod_discount} off)</span>` : '<span class="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">Standard Account</span>';
+          ctxBox.innerHTML = `
+            <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div class="flex items-center flex-wrap gap-2.5">
+                <span class="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
+                  <i class="fa-solid fa-circle-check"></i> Account Verified
+                </span>
+                <span class="text-slate-300">Target Account: <strong class="text-white font-mono">${userLabel}</strong></span>
+                ${fodBadge}
+              </div>
+              <span class="text-slate-400 font-mono text-[11px]"><i class="fa-solid fa-bolt text-rose-400 mr-1"></i>Delivery & pricing verified with target account session</span>
+            </div>
+          `;
+        } else {
+          ctxBox.innerHTML = '';
+        }
+
         rep.results.forEach((r, idx) => {
           const tr = document.createElement('tr');
           const isCheapest = idx === 0 && r.status === 'VERIFIED_AVAILABLE';
           const loc = r.city ? `${r.city}, ${r.state}` : (r.state || 'N/A');
+          const accDiscount = r.account_discount || r.eligible_discounts || 0;
 
           tr.className = isCheapest ? 'bg-emerald-950/30' : '';
           tr.innerHTML = `
@@ -1004,10 +1136,14 @@ HTML_TEMPLATE = """
             <td class="py-2.5 px-3 font-mono font-medium">${r.pincode}</td>
             <td class="py-2.5 px-3 text-xs text-slate-300">${loc}</td>
             <td class="py-2.5 px-3">₹${r.displayed_product_price.toFixed(2)}</td>
-            <td class="py-2.5 px-3">₹${r.delivery_charges.toFixed(2)}</td>
-            <td class="py-2.5 px-3 text-emerald-400">₹${r.payment_method_discounts.toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-mono">₹${r.delivery_charges.toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-semibold ${accDiscount > 0 ? 'text-emerald-400' : 'text-slate-500'}">${accDiscount > 0 ? '-₹' + accDiscount.toFixed(2) : '₹0.00'}</td>
             <td class="py-2.5 px-3 font-bold text-rose-400">₹${r.final_payable_price.toFixed(2)}</td>
-            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[11px] ${r.status === 'VERIFIED_AVAILABLE' ? 'badge-fresh' : 'badge-error'}">${r.status}</span></td>
+            <td class="py-2.5 px-3">
+              <span class="px-2 py-0.5 rounded text-[10px] ${r.status === 'VERIFIED_AVAILABLE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}">
+                <i class="fa-solid ${r.account_verified ? 'fa-check-double text-emerald-400' : 'fa-circle-xmark'} mr-1"></i>${r.account_verified ? 'Account Verified' : r.status}
+              </span>
+            </td>
           `;
           tbody.appendChild(tr);
         });
@@ -1255,11 +1391,22 @@ HTML_TEMPLATE = """
               </table>
             </div>
           ` : ''}
-          <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-300">
-            <span>Verified with live Meesho order history API (/api/3.0/user/orders)</span>
-            <button onclick="downloadJsonData(window.lastAccSummary, 'classified_accounts.json')" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 transition">
-              <i class="fa-solid fa-download"></i> Download Classified JSON
-            </button>
+          <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-circle-check text-emerald-400"></i> Verified with live Meesho order history API (/api/3.0/user/orders)</span>
+            <div class="flex items-center flex-wrap gap-2">
+              <button onclick="downloadFreshAccountsJson()" ${s.fresh_count === 0 ? 'disabled' : ''} class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5 font-medium transition shadow">
+                <i class="fa-solid fa-download"></i> Download fresh_${s.fresh_count}.json
+              </button>
+              <button onclick="downloadUsedAccountsJson()" ${s.used_count === 0 ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5 font-medium transition shadow">
+                <i class="fa-solid fa-download"></i> Download used_${s.used_count}.json
+              </button>
+              <button onclick="downloadCombinedAccountsJson()" class="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5 font-medium transition shadow">
+                <i class="fa-solid fa-file-export"></i> Combined JSON (${(s.fresh_count || 0) + (s.used_count || 0)})
+              </button>
+              <button onclick="sendFreshToSeeding()" ${s.fresh_count === 0 ? 'disabled' : ''} class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-purple-300 border border-purple-800 px-3 py-1.5 rounded text-xs flex items-center gap-1.5 font-medium transition">
+                <i class="fa-solid fa-arrow-right"></i> Send Fresh to Seeding
+              </button>
+            </div>
           </div>
         `;
       } catch (err) {
@@ -1269,16 +1416,103 @@ HTML_TEMPLATE = """
       }
     }
 
+    function downloadFreshAccountsJson() {
+      const accs = window.lastAccSummary && window.lastAccSummary.fresh_accounts ? window.lastAccSummary.fresh_accounts : [];
+      const count = window.lastAccSummary && window.lastAccSummary.summary ? window.lastAccSummary.summary.fresh_count : accs.length;
+      downloadJsonData(accs, `fresh_${count}.json`);
+    }
+
+    function downloadUsedAccountsJson() {
+      const accs = window.lastAccSummary && window.lastAccSummary.used_accounts ? window.lastAccSummary.used_accounts : [];
+      const count = window.lastAccSummary && window.lastAccSummary.summary ? window.lastAccSummary.summary.used_count : accs.length;
+      downloadJsonData(accs, `used_${count}.json`);
+    }
+
+    function downloadCombinedAccountsJson() {
+      const accs = window.lastAccSummary && window.lastAccSummary.combined_accounts ? window.lastAccSummary.combined_accounts : [];
+      const count = accs.length;
+      downloadJsonData(accs, `combined_${count}.json`);
+    }
+
+    function sendFreshToSeeding() {
+      const accs = window.lastAccSummary && window.lastAccSummary.fresh_accounts ? window.lastAccSummary.fresh_accounts : [];
+      if (!accs || accs.length === 0) {
+        alert("No fresh accounts found to send.");
+        return;
+      }
+      switchTab('tab-assignment');
+      const radio = document.querySelector('input[name="assign-input-mode"][value="paste"]');
+      if (radio) {
+        radio.checked = true;
+        toggleAccountInputMode('assign');
+      }
+      const ta = document.getElementById('assign-paste-textarea');
+      if (ta) {
+        ta.value = JSON.stringify(accs, null, 2);
+        handlePastedMultipleAccounts('assign');
+      }
+    }
+
+    function toggleSeedingMode() {
+      const radios = document.getElementsByName('seeding-mode');
+      let mode = 'both';
+      for (const r of radios) { if (r.checked) mode = r.value; }
+
+      const cartBox = document.getElementById('cart-set-container');
+      const addrBox = document.getElementById('address-set-container');
+      const btnText = document.getElementById('assign-btn-text');
+      const cartName = (document.getElementById('assign-cart-name').value || 'Cart Set 1').trim();
+      const addrName = (document.getElementById('assign-address-name').value || 'Address Set 1').trim();
+
+      if (mode === 'cart_only') {
+        cartBox.classList.remove('opacity-40');
+        addrBox.classList.add('opacity-40');
+        if (btnText) btnText.textContent = `Seed Cart (${cartName})`;
+      } else if (mode === 'address_only') {
+        cartBox.classList.add('opacity-40');
+        addrBox.classList.remove('opacity-40');
+        if (btnText) btnText.textContent = `Assign Address (${addrName})`;
+      } else {
+        cartBox.classList.remove('opacity-40');
+        addrBox.classList.remove('opacity-40');
+        if (btnText) btnText.textContent = `Run Bulk Seeding (Cart + Address)`;
+      }
+    }
+
+    function toggleAddrEntryMode() {
+      const mode = document.querySelector('input[name="addr-entry-mode"]:checked').value;
+      if (mode === 'json') {
+        document.getElementById('addr-box-form').classList.add('hidden');
+        document.getElementById('addr-box-json').classList.remove('hidden');
+      } else {
+        document.getElementById('addr-box-form').classList.remove('hidden');
+        document.getElementById('addr-box-json').classList.add('hidden');
+      }
+    }
+
+    function updateCartCounter() {
+      const text = document.getElementById('assign-products-input').value;
+      const prods = text.split(/[\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
+      document.getElementById('cart-items-count').textContent = prods.length;
+    }
+
     // ==========================================
-    // ACTION 4: BULK ASSIGNMENT
+    // ACTION 4: BULK SEEDING (DECOUPLED)
     // ==========================================
     async function runAssignment() {
       const spinner = document.getElementById('assign-spinner');
       const btn = document.getElementById('btn-run-assign');
       const area = document.getElementById('assignment-results-card');
+
+      const modeRadio = document.querySelector('input[name="seeding-mode"]:checked');
+      const mode = modeRadio ? modeRadio.value : 'both';
+      const cartSetName = (document.getElementById('assign-cart-name').value || 'Cart Set 1').trim();
+      const addressSetName = (document.getElementById('assign-address-name').value || 'Address Set 1').trim();
+
       const seed = parseInt(document.getElementById('assign-seed').value) || 42;
-      const count = parseInt(document.getElementById('assign-count').value) || 2;
+      const count = parseInt(document.getElementById('assign-count').value) || 1;
       const dryRun = document.getElementById('assign-dryrun').checked;
+      const addrStrategy = document.getElementById('assign-addr-strategy').value;
 
       let accounts;
       try {
@@ -1287,6 +1521,62 @@ HTML_TEMPLATE = """
         area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded">${err.message}</div>`;
         area.classList.remove('hidden');
         return;
+      }
+
+      // Products validation (no default fallback)
+      let productsSource = null;
+      if (mode === 'cart_only' || mode === 'both') {
+        const prodText = document.getElementById('assign-products-input').value.trim();
+        const prods = prodText.split(/[\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
+        if (prods.length === 0) {
+          area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Error:</strong> Please enter at least one product ID or URL for ${cartSetName}. No default products are used.</div>`;
+          area.classList.remove('hidden');
+          return;
+        }
+        productsSource = prods;
+      }
+
+      // Address validation (no default fallback)
+      let addressesSource = null;
+      if (mode === 'address_only' || mode === 'both') {
+        const addrEntryMode = document.querySelector('input[name="addr-entry-mode"]:checked').value;
+        if (addrEntryMode === 'json') {
+          const jsonText = document.getElementById('assign-address-json').value.trim();
+          if (!jsonText) {
+            area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Error:</strong> Please enter address JSON for ${addressSetName}. No default addresses are used.</div>`;
+            area.classList.remove('hidden');
+            return;
+          }
+          try {
+            addressesSource = JSON.parse(jsonText);
+          } catch (e) {
+            area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Error:</strong> Invalid JSON in ${addressSetName}: ${e.message}</div>`;
+            area.classList.remove('hidden');
+            return;
+          }
+        } else {
+          const name = document.getElementById('addr-name').value.trim();
+          const mobile = document.getElementById('addr-mobile').value.trim();
+          const line1 = document.getElementById('addr-line1').value.trim();
+          const city = document.getElementById('addr-city').value.trim();
+          const state = document.getElementById('addr-state').value.trim();
+          const pin = document.getElementById('addr-pin').value.trim();
+
+          if (!name || !mobile || !line1 || !city || !state || !pin) {
+            area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Error:</strong> Please fill in all address fields for ${addressSetName} (Name, Mobile, Line 1, City, State, Pincode). No default addresses are used.</div>`;
+            area.classList.remove('hidden');
+            return;
+          }
+          addressesSource = [{
+            name: name,
+            mobile: mobile,
+            address_line_1: line1,
+            city: city,
+            state: state,
+            pin: pin,
+            address_type: "Home"
+          }];
+        }
       }
 
       spinner.classList.remove('hidden');
@@ -1300,8 +1590,14 @@ HTML_TEMPLATE = """
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accounts_source: accounts,
+            mode: mode,
+            cart_set_name: cartSetName,
+            address_set_name: addressSetName,
+            products_source: productsSource,
+            addresses_source: addressesSource,
             seed: seed,
             count: count,
+            address_strategy: addrStrategy,
             dry_run: dryRun
           })
         });
@@ -1310,7 +1606,7 @@ HTML_TEMPLATE = """
         btn.disabled = false;
 
         if (!data.success) {
-          area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded">Assignment Error: ${data.error}</div>`;
+          area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Assignment Error:</strong> ${data.error}</div>`;
           area.classList.remove('hidden');
           return;
         }
@@ -1318,11 +1614,18 @@ HTML_TEMPLATE = """
         const rep = data.report;
         window.lastAssignmentReport = rep;
 
+        let modeBadge = `<span class="px-2 py-0.5 rounded text-xs bg-purple-950 text-purple-300 border border-purple-800">Mode: ${rep.operation_mode || mode}</span>`;
         let html = `
           <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
             <div>
-              <h3 class="font-semibold text-white">Assignment Report (Mode: ${rep.mode})</h3>
-              <p class="text-xs text-slate-400">Random Seed: ${data.seed} &bull; Total Accounts: ${rep.total_accounts}</p>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold text-white">Seeding Report (${rep.mode})</h3>
+                ${modeBadge}
+              </div>
+              <p class="text-xs text-slate-400 mt-1">
+                ${mode === 'cart_only' ? `Cart: ${rep.cart_set_name || cartSetName}` : (mode === 'address_only' ? `Address: ${rep.address_set_name || addressSetName}` : `Cart: ${rep.cart_set_name || cartSetName} &bull; Address: ${rep.address_set_name || addressSetName}`)}
+                &bull; Total Accounts: ${rep.total_accounts} &bull; Seed: ${data.seed}
+              </p>
             </div>
             <button onclick="downloadJsonData(window.lastAssignmentReport, 'assignment_plan.json')" class="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 transition">
               <i class="fa-solid fa-download"></i> Download Assignment Plan
@@ -1332,17 +1635,27 @@ HTML_TEMPLATE = """
         `;
         rep.results.forEach(res => {
           let badgeClass = 'bg-purple-950 text-purple-400 border border-purple-800';
-          if (res.status === 'SUCCESS') badgeClass = 'bg-emerald-950 text-emerald-400 border border-emerald-800';
+          if (res.status === 'SUCCESS' || res.status === 'SIMULATED_SUCCESS') badgeClass = 'bg-emerald-950 text-emerald-400 border border-emerald-800';
           else if (res.status === 'FAILED') badgeClass = 'bg-rose-950 text-rose-400 border border-rose-800';
           else if (res.status && res.status.includes('SKIPPED')) badgeClass = 'bg-amber-950 text-amber-300 border border-amber-800';
+
+          let details = [];
+          if (mode === 'cart_only' || mode === 'both') {
+            details.push(`${res.assigned_products_count} cart item(s)`);
+          }
+          if (mode === 'address_only' || mode === 'both') {
+            details.push(`Pincode: ${res.assigned_address_pincode || 'None'}`);
+            if (res.registered_address_id) {
+              details.push(`Address ID: ${res.registered_address_id}`);
+            }
+          }
 
           html += `
             <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg">
               <div class="flex items-center justify-between">
                 <div>
                   <span class="font-mono text-sm text-purple-400 font-semibold">${res.account_id}</span>
-                  <span class="text-xs text-slate-400 ml-2">&bull; Pincode: ${res.assigned_address_pincode || 'N/A'}</span>
-                  <span class="text-xs text-slate-400 ml-2">&bull; ${res.assigned_products_count} product(s)</span>
+                  <span class="text-xs text-slate-400 ml-2">&bull; ${details.join(' &bull; ')}</span>
                 </div>
                 <span class="px-2 py-0.5 rounded text-xs ${badgeClass}">${res.status}</span>
               </div>
@@ -1568,8 +1881,16 @@ def api_compare_pricing():
             report = comparator.compare_product_pricing(product, pincodes=pincodes)
 
         elapsed = time.time() - start_time
-        print(f"[+] /api/compare-pricing: Finished {len(report.results)} pincodes in {elapsed:.2f}s", flush=True)
-        return jsonify({"success": True, "report": report.to_dict()})
+        print(f"[+] /api/compare-pricing: Finished {len(report.results)} pincodes in {elapsed:.2f}s for account {user_ident}", flush=True)
+        acc_ctx = getattr(report, "account_context", None)
+        if acc_ctx is not None and not isinstance(acc_ctx, dict):
+            acc_ctx = None
+
+        return jsonify({
+            "success": True,
+            "report": report.to_dict(),
+            "account_context": acc_ctx
+        })
     except Exception as e:
         logger.exception(f"Pricing comparison failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1638,6 +1959,8 @@ def api_classify_fod():
 def api_classify_accounts():
     """
     Classifies accounts into fresh vs used vs unknown. Always Live order history check as requested.
+    Returns categorized account arrays (fresh_{count}.json, used_{count}.json, combined) with refreshed
+    tokens if refreshed, or original if unrefreshed.
     """
     req = request.json or {}
     source = req.get("source")
@@ -1659,7 +1982,14 @@ def api_classify_accounts():
         return jsonify({
             "success": True,
             "summary": summary.to_dict()["summary"],
-            "detailed_results": [r.to_dict() for r in (summary.fresh_accounts + summary.used_accounts + summary.unknown_accounts)]
+            "detailed_results": [r.to_dict() for r in (summary.fresh_accounts + summary.used_accounts + summary.unknown_accounts)],
+            "fresh_accounts": summary.get_fresh_account_records(),
+            "used_accounts": summary.get_used_account_records(),
+            "unknown_accounts": summary.get_unknown_account_records(),
+            "combined_accounts": summary.get_combined_account_records(),
+            "fresh_count": summary.fresh_count,
+            "used_count": summary.used_count,
+            "unknown_count": summary.unknown_count
         })
     except Exception as e:
         logger.exception(f"Account classification failed: {e}")
@@ -1669,24 +1999,42 @@ def api_classify_accounts():
 @app.route("/api/run-assignment", methods=["POST"])
 def api_run_assignment():
     """
-    Runs deterministic bulk assignment with built-in fallbacks.
+    Runs deterministic bulk assignment with decoupled cart addition and address assignment.
+    Takes inputs directly from user without hardcoded defaults.
     """
     req = request.json or {}
+    mode = req.get("mode", "both")  # "cart_only", "address_only", "both"
+    cart_set_name = str(req.get("cart_set_name") or "Cart Set 1").strip()
+    address_set_name = str(req.get("address_set_name") or "Address Set 1").strip()
     seed = req.get("seed", 42)
-    count = req.get("count", 2)
+    count = req.get("count", 1)
+    address_strategy = req.get("address_strategy", "round_robin")
     dry_run = req.get("dry_run", True)
     format_type = req.get("format_type", "combined_json")
-    accounts_source = req.get("accounts_source") or req.get("source")
-    products_source = req.get("products_source") or DEFAULT_PRODUCTS
-    addresses_source = req.get("addresses_source") or DEFAULT_ADDRESSES
+    accounts_source = req.get("accounts_source") or req.get("source") or req.get("accounts_file")
+    products_source = req.get("products_source") or req.get("products_file")
+    addresses_source = req.get("addresses_source") or req.get("addresses_file")
 
     if not accounts_source:
-        return jsonify({"success": False, "error": "No target accounts provided"}), 400
+        return jsonify({"success": False, "error": "No target accounts provided. Please upload or paste accounts."}), 400
 
-    print(f"[*] /api/run-assignment: seed={seed}, count={count}, dry_run={dry_run}", flush=True)
+    if mode in ("cart_only", "both") and not products_source:
+        return jsonify({"success": False, "error": f"No products provided for {cart_set_name}. Please input product IDs or URLs."}), 400
+
+    if mode in ("address_only", "both") and not addresses_source:
+        return jsonify({"success": False, "error": f"No addresses provided for {address_set_name}. Please input address details."}), 400
+
+    print(f"[*] /api/run-assignment: mode={mode}, cart_set={cart_set_name}, addr_set={address_set_name}, seed={seed}, count={count}, dry_run={dry_run}", flush=True)
 
     try:
-        cfg = AssignmentRuleConfig(products_per_account=count, random_seed=seed)
+        cfg = AssignmentRuleConfig(
+            products_per_account=count,
+            random_seed=seed,
+            mode=mode,
+            cart_set_name=cart_set_name,
+            address_set_name=address_set_name,
+            address_strategy=address_strategy
+        )
         report = run_bulk_assignment_from_source(
             products_source=products_source,
             addresses_source=addresses_source,
@@ -1696,8 +2044,8 @@ def api_run_assignment():
             output_dir=None,
             format_type=format_type
         )
-        print(f"[+] /api/run-assignment: Generated plan for {report.get('total_accounts', 0)} accounts", flush=True)
-        return jsonify({"success": True, "seed": seed, "report": report})
+        print(f"[+] /api/run-assignment: Completed assignment plan ({mode}) for {report.get('total_accounts', 0)} accounts", flush=True)
+        return jsonify({"success": True, "seed": seed, "mode": mode, "report": report})
     except Exception as e:
         logger.exception(f"Assignment generation failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

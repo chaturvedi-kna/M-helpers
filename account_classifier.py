@@ -32,6 +32,7 @@ class AccountRecordResult:
     validation_errors: List[str] = field(default_factory=list)
     account_id: Optional[str] = None
     mobile: Optional[str] = None
+    is_refreshed: bool = False
     raw_record: Optional[Dict[str, Any]] = None
 
     def to_dict(self, include_raw: bool = False) -> Dict[str, Any]:
@@ -43,6 +44,7 @@ class AccountRecordResult:
             "order_count": self.order_count,
             "reason": self.reason,
             "is_valid_schema": self.is_valid_schema,
+            "is_refreshed": self.is_refreshed,
             "validation_errors": self.validation_errors
         }
         if include_raw and self.raw_record is not None:
@@ -63,6 +65,31 @@ class ClassificationSummary:
     unknown_accounts: List[AccountRecordResult] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)
 
+    @staticmethod
+    def _clean_record(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not raw or not isinstance(raw, dict):
+            return {}
+        rec = dict(raw)
+        rec.pop("_is_refreshed", None)
+        return rec
+
+    def get_fresh_account_records(self) -> List[Dict[str, Any]]:
+        """Returns array of fresh account dicts (refreshed if updated, else original)."""
+        return [self._clean_record(r.raw_record) for r in self.fresh_accounts if r.raw_record]
+
+    def get_used_account_records(self) -> List[Dict[str, Any]]:
+        """Returns array of used account dicts (refreshed if updated, else original)."""
+        return [self._clean_record(r.raw_record) for r in self.used_accounts if r.raw_record]
+
+    def get_unknown_account_records(self) -> List[Dict[str, Any]]:
+        """Returns array of unknown account dicts."""
+        return [self._clean_record(r.raw_record) for r in self.unknown_accounts if r.raw_record]
+
+    def get_combined_account_records(self) -> List[Dict[str, Any]]:
+        """Returns array of all classified account dicts combined."""
+        all_recs = self.fresh_accounts + self.used_accounts + self.unknown_accounts
+        return [self._clean_record(r.raw_record) for r in all_recs if r.raw_record]
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "summary": {
@@ -78,6 +105,9 @@ class ClassificationSummary:
             "detailed_results": [
                 r.to_dict() for r in (self.fresh_accounts + self.used_accounts + self.unknown_accounts)
             ],
+            "fresh_accounts": self.get_fresh_account_records(),
+            "used_accounts": self.get_used_account_records(),
+            "combined_accounts": self.get_combined_account_records(),
             "errors": self.errors
         }
 
@@ -149,6 +179,7 @@ def fetch_live_order_count(
         return None, "Missing user_id for live orders query", False
 
     curr_acc = dict(account_data)
+    refreshed_flag = False
 
     def _refresh(acc):
         try:
@@ -161,6 +192,9 @@ def fetch_live_order_count(
     if auto_refresh and is_token_expired(curr_acc):
         try:
             curr_acc = _refresh(curr_acc)
+            refreshed_flag = True
+            account_data.update(curr_acc)
+            account_data["_is_refreshed"] = True
         except Exception as e:
             logger.warning(f"Failed to auto-refresh token before live orders query: {e}")
 
@@ -188,6 +222,9 @@ def fetch_live_order_count(
             # Retry once after explicit refresh
             try:
                 curr_acc = _refresh(curr_acc)
+                refreshed_flag = True
+                account_data.update(curr_acc)
+                account_data["_is_refreshed"] = True
                 headers = build_meesho_headers(curr_acc)
                 sess.headers.clear()
                 sess.headers.update(headers)
@@ -275,6 +312,10 @@ def classify_account_data(
         classification = AccountClassification.USED
         reason = f"Classified as used: {explanation}."
 
+    is_refreshed = bool(data.get("_is_refreshed", False)) if isinstance(data, dict) else False
+    if isinstance(data, dict):
+        data.pop("_is_refreshed", None)
+
     return AccountRecordResult(
         source_file=source_reference,
         classification=classification,
@@ -284,6 +325,7 @@ def classify_account_data(
         validation_errors=errors,
         account_id=user_id or None,
         mobile=mobile or None,
+        is_refreshed=is_refreshed,
         raw_record=data
     )
 
@@ -370,6 +412,9 @@ def classify_multiple_accounts(
         dump_json("fresh_accounts.json", fresh_list)
         dump_json("used_accounts.json", used_list)
         dump_json("unknown_accounts.json", unknown_list)
+        dump_json(f"fresh_{len(fresh_list)}.json", fresh_list)
+        dump_json(f"used_{len(used_list)}.json", used_list)
+        dump_json(f"combined_{len(fresh_list) + len(used_list)}.json", fresh_list + used_list)
 
         summary_file = out_p / "classification_summary.json"
         with open(summary_file, "w", encoding="utf-8") as f:
@@ -444,6 +489,17 @@ def classify_accounts_from_source(
             "unknown": [r.to_dict(include_raw=True) for r in unknown_list]
         }
         export_categorized_results(categorized, output_dir=output_dir, format_type=format_type)
+
+        out_p = Path(output_dir).resolve()
+        try:
+            with open(out_p / f"fresh_{len(fresh_list)}.json", "w", encoding="utf-8") as f:
+                json.dump(summary.get_fresh_account_records(), f, indent=2, ensure_ascii=False)
+            with open(out_p / f"used_{len(used_list)}.json", "w", encoding="utf-8") as f:
+                json.dump(summary.get_used_account_records(), f, indent=2, ensure_ascii=False)
+            with open(out_p / f"combined_{len(fresh_list) + len(used_list)}.json", "w", encoding="utf-8") as f:
+                json.dump(summary.get_combined_account_records(), f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Could not write clean count-based JSONs to {out_p}: {e}")
 
     return summary
 

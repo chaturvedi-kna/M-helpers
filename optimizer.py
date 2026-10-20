@@ -35,36 +35,36 @@ def check_shipping_charges_fast(
                 "serviceable": shipping.get("serviceable", True),
                 "charges": float(shipping.get("charges") or 0.0),
                 "expected_delivery": shipping.get("expected_delivery_time"),
-                "estimated_date": shipping.get("estimated_delivery_date")
+                "estimated_date": shipping.get("estimated_delivery_date"),
+                "account_specific": True
             }
     except Exception:
         pass
 
-    # Direct benchmark query fallback (handles expired or revoked client sessions)
+    # Direct query fallback using client's session headers or anonymous headers
     try:
         import requests
         import proxy_manager
-        b_headers = {
-            "Authorization": "32c4d8137cn9eb493a1921f203173080",
-            "App-Version": "29.6",
-            "App-Version-Code": "870",
-            "Instance-Id": "afb8ae73167b4f6eb93ddf9824d87efc",
-            "Country-Iso": "in",
-            "Application-Id": "com.meesho.supply",
-            "App-Session-Id": "d3515637-9831-45a7-9a7e-ebec00c46d0d",
-            "App-Sdk-Version": "34",
-            "App-Client-Id": "android",
-            "Shield-Session-Id": "47a20e2791634e758271c29db9f09656",
-            "Xo": "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakUzT1RJMU9EUTVPREFzSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5cGJuTjBZVzVqWlY5cFpDSTZJbUZtWWpoaFpUY3pNVFkzWWpSbU5tVmlPVE5rWkdZNU9ESTBaRGczWldaaklpd2lhSFIwY0hNNkx5OXRaV1Z6YUc4dVkyOXRMM1Z6WlhKZmFXUWlPaUkwT1RJeU5USXhNellpTENKcFlYUWlPakUzT1RJME1USXhPREI5LktJY1dqYWczSy15RUJvSUFQdEczd2IyQ21DV3N1MVN3T1ZxclZXVGpGU28iLCJ4byI6Ijc1OWZiNzhkZWMzNzRiMzM4ZmU1YmU0MTcxMTcyNzQ5In0=",
-            "App-Iso-Language-Code": "en",
-            "App-User-Id": "492252136",
-            "U-Token": "KzkxNzk3Nzc0ODUxNA==",
-            "Meesho-User-Context": "logged_in",
-            "App-User-Location": "eyJsYXQiOiIyOC41NjcyIiwibG9uZyI6Ijc3LjI3MjUiLCJwaW5jb2RlIjoiMTEwMDI1IiwiY2l0eSI6Ik5ldyBEZWxoaSIsImFkZHJlc3NfaWQiOm51bGx9",
-            "User-Agent": "okhttp/4.9.0"
-        }
+        from auth import build_meesho_headers
+
+        if client and hasattr(client, "account_data") and client.account_data:
+            sess_headers = build_meesho_headers(client.account_data)
+            is_acc = True
+        else:
+            sess_headers = {
+                "Authorization": "32c4d8137cn9eb493a1921f203173080",
+                "App-Version": "29.6",
+                "App-Version-Code": "870",
+                "Country-Iso": "in",
+                "Application-Id": "com.meesho.supply",
+                "App-Client-Id": "android",
+                "Meesho-User-Context": "anonymous",
+                "User-Agent": "okhttp/4.9.0"
+            }
+            is_acc = False
+
         sess = requests.Session()
-        sess.headers.update(b_headers)
+        sess.headers.update(sess_headers)
         r = proxy_manager.request_with_retry(sess, "GET", "https://prod.meeshoapi.com/api/1.0/shipping", params=params, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -75,8 +75,11 @@ def check_shipping_charges_fast(
                     "serviceable": shipping.get("serviceable", True),
                     "charges": float(shipping.get("charges") or 0.0),
                     "expected_delivery": shipping.get("expected_delivery_time"),
-                    "estimated_date": shipping.get("estimated_delivery_date")
+                    "estimated_date": shipping.get("estimated_delivery_date"),
+                    "account_specific": is_acc
                 }
+    except Exception:
+        pass
     except Exception:
         pass
 
