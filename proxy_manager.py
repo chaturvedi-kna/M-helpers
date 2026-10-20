@@ -130,6 +130,12 @@ class StickySessionManager:
             self._sessions[k]["pool_proxy"] = proxy_url
             self._sessions[k]["last_seen"] = time.time()
 
+    def clear_sticky_session(self, account_key: Optional[str]):
+        if not account_key:
+            return
+        with self._lock:
+            self._sessions.pop(str(account_key), None)
+
     def clear(self):
         with self._lock:
             self._sessions.clear()
@@ -410,11 +416,22 @@ def request_with_retry(
                     retries=1
                 )
                 if pb_resp.status_code < 500:
+                    # Detect proxy-level gateway glitches: empty body on 400/403 or Cloudflare HTML error page
+                    is_empty_err = (pb_resp.status_code >= 400 and not pb_resp.content)
+                    is_cf_html = ("cloudflare" in pb_resp.headers.get("server", "").lower() and "json" not in pb_resp.headers.get("content-type", "").lower() and pb_resp.status_code >= 400)
+                    if is_empty_err or is_cf_html:
+                        log(f"[ProxyManager] Proxybin returned proxy-level error HTTP {pb_resp.status_code} (empty/HTML body). Clearing sticky session and retrying...")
+                        _STICKY_MANAGER.clear_sticky_session(account_key)
+                        pb_failed_count += 1
+                        time.sleep(0.5)
+                        continue
                     return pb_resp
                 log(f"[ProxyManager] Proxybin returned HTTP {pb_resp.status_code} (attempt {attempt}/{max_pb_attempts}).")
+                _STICKY_MANAGER.clear_sticky_session(account_key)
                 pb_failed_count += 1
             except Exception as pb_err:
                 log(f"[ProxyManager] Proxybin attempt {attempt}/{max_pb_attempts} failed: {pb_err}")
+                _STICKY_MANAGER.clear_sticky_session(account_key)
                 pb_failed_count += 1
                 time.sleep(0.5)
 

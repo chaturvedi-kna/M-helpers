@@ -1568,7 +1568,7 @@ def api_compare_pricing():
             report = comparator.compare_product_pricing(product, pincodes=pincodes)
 
         elapsed = time.time() - start_time
-        print(f"[✓] /api/compare-pricing: Finished {len(report.results)} pincodes in {elapsed:.2f}s", flush=True)
+        print(f"[+] /api/compare-pricing: Finished {len(report.results)} pincodes in {elapsed:.2f}s", flush=True)
         return jsonify({"success": True, "report": report.to_dict()})
     except Exception as e:
         logger.exception(f"Pricing comparison failed: {e}")
@@ -1594,7 +1594,7 @@ def api_live_fod():
 
     try:
         record = fetch_live_fod(account_data=account_data)
-        print(f"[✓] /api/live-fod: Retrieved tier={record.advertised_tier}, amount={record.advertised_amount}", flush=True)
+        print(f"[+] /api/live-fod: Retrieved tier={record.advertised_tier}, amount={record.advertised_amount}", flush=True)
         return jsonify(record.to_dict(include_raw=False))
     except Exception as e:
         logger.exception(f"Live FOD fetch failed: {e}")
@@ -1622,7 +1622,7 @@ def api_classify_fod():
             output_dir=None,
             format_type=format_type
         )
-        print(f"[✓] /api/classify-fod: Completed {summary.total_scanned} accounts", flush=True)
+        print(f"[+] /api/classify-fod: Completed {summary.total_scanned} accounts", flush=True)
         return jsonify({
             "success": True,
             "summary": summary.to_dict()["summary"],
@@ -1655,7 +1655,7 @@ def api_classify_accounts():
             format_type=format_type,
             live=True  # ALWAYS LIVE
         )
-        print(f"[✓] /api/classify-accounts: Completed {summary.total_scanned} accounts (Fresh: {summary.fresh_count}, Used: {summary.used_count}, Unknown: {summary.unknown_count})", flush=True)
+        print(f"[+] /api/classify-accounts: Completed {summary.total_scanned} accounts (Fresh: {summary.fresh_count}, Used: {summary.used_count}, Unknown: {summary.unknown_count})", flush=True)
         return jsonify({
             "success": True,
             "summary": summary.to_dict()["summary"],
@@ -1696,7 +1696,7 @@ def api_run_assignment():
             output_dir=None,
             format_type=format_type
         )
-        print(f"[✓] /api/run-assignment: Generated plan for {report.get('total_accounts', 0)} accounts", flush=True)
+        print(f"[+] /api/run-assignment: Generated plan for {report.get('total_accounts', 0)} accounts", flush=True)
         return jsonify({"success": True, "seed": seed, "report": report})
     except Exception as e:
         logger.exception(f"Assignment generation failed: {e}")
@@ -1723,7 +1723,7 @@ def api_refresh_accounts():
             output_dir=None,
             format_type=format_type
         )
-        print(f"[✓] /api/refresh-accounts: Total={summary.get('total', 0)}, Refreshed={summary.get('refreshed_count', 0)}, Failed={summary.get('failed_count', 0)}", flush=True)
+        print(f"[+] /api/refresh-accounts: Total={summary.get('total', 0)}, Refreshed={summary.get('refreshed_count', 0)}, Failed={summary.get('failed_count', 0)}", flush=True)
         return jsonify({"success": True, "summary": summary, "format_type": format_type})
     except Exception as e:
         logger.exception(f"Token refresh failed: {e}")

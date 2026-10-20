@@ -404,15 +404,15 @@ class TestEnhancements(unittest.TestCase):
         self.assertEqual(meta.expires_at, 1791561584.0)
 
     def test_order_classifier_referral_done_and_list_keys(self):
-        """Verifies account_classifier accurately detects used status from referral_done and order list keys."""
+        """Verifies account_classifier accurately detects used status from order list keys."""
         from account_classifier import extract_order_history_info, classify_account_data, AccountClassification
 
-        # 1. _referral_done inside identity
+        # 1. order_list inside account
         acc1 = {
             "mobile": "9232582410",
             "user_id": 602863348,
             "xo": "fake.xo",
-            "identity": {"_referral_done": True}
+            "order_list": [{"id": 101}]
         }
         res1 = classify_account_data(acc1, live=False)
         self.assertEqual(res1.classification, AccountClassification.USED)

@@ -106,6 +106,7 @@ def build_meesho_headers(account_data: Dict[str, Any]) -> Dict[str, str]:
         "App-User-Id": user_id,
         "U-Token": u_token,
         "Meesho-User-Context": "logged_in" if xo else "anonymous",
+        "App-User-Location": account_data.get("app_user_location") or "eyJsYXQiOiIyOC41NjcyIiwibG9uZyI6Ijc3LjI3MjUiLCJwaW5jb2RlIjoiMTEwMDI1IiwiY2l0eSI6Ik5ldyBEZWxoaSIsImFkZHJlc3NfaWQiOm51bGx9",
         "X-Wishlist-Aggregation-Required": "false",
         "Accept": "application/json",
         "Content-Type": "application/json; charset=UTF-8",

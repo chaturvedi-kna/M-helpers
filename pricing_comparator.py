@@ -22,6 +22,7 @@ logger = logging.getLogger("PricingComparator")
 ALL_INDIA_PINCODES = [
     # Zone 1: North (Delhi, Haryana, Punjab, HP, J&K)
     {"pin": "110001", "city": "New Delhi", "state": "Delhi", "zone": "Zone 1 (North)"},
+    {"pin": "110025", "city": "New Delhi", "state": "Delhi", "zone": "Zone 1 (North)"},
     {"pin": "122001", "city": "Gurgaon", "state": "Haryana", "zone": "Zone 1 (North)"},
     {"pin": "141001", "city": "Ludhiana", "state": "Punjab", "zone": "Zone 1 (North)"},
     {"pin": "171001", "city": "Shimla", "state": "Himachal Pradesh", "zone": "Zone 1 (North)"},
@@ -53,6 +54,7 @@ ALL_INDIA_PINCODES = [
 
     # Zone 5: South (AP, Telangana, Karnataka)
     {"pin": "500001", "city": "Hyderabad", "state": "Telangana", "zone": "Zone 5 (South)"},
+    {"pin": "500092", "city": "Hyderabad", "state": "Telangana", "zone": "Zone 5 (South)"},
     {"pin": "520001", "city": "Vijayawada", "state": "Andhra Pradesh", "zone": "Zone 5 (South)"},
     {"pin": "530001", "city": "Visakhapatnam", "state": "Andhra Pradesh", "zone": "Zone 5 (South)"},
     {"pin": "560001", "city": "Bangalore", "state": "Karnataka", "zone": "Zone 5 (South)"},
@@ -214,12 +216,12 @@ class ProductPricingComparator:
         product_url_or_id: Union[str, int],
         pincodes: Optional[List[Union[str, int]]] = None,
         price_type: str = PRICE_TYPE_BASIC,
-        use_cache: bool = True,
+        use_cache: bool = False,
         all_india: bool = False
     ) -> PricingComparisonReport:
         """
         Accepts a product URL or ID and candidate pincodes (or all_india=True), evaluates pricing for each,
-        and returns a structured PricingComparisonReport ranked by final payable price.
+        and returns a structured PricingComparisonReport ranked by lowest final payable price.
         """
         if all_india or not pincodes:
             candidate_pins = get_all_india_pincodes()
@@ -235,7 +237,7 @@ class ProductPricingComparator:
         try:
             prod_info = get_product_info(self.client, product_id)
             product_name = prod_info.get("name") or f"Product {product_id}"
-            supplier_id = prod_info.get("supplier_id")
+            supplier_id = prod_info.get("supplier_id") or 0
             base_price = float(prod_info.get("price") or 0.0)
             variations = prod_info.get("variations") or []
             in_stock_vars = [v for v in variations if v.get("in_stock")]
@@ -261,7 +263,7 @@ class ProductPricingComparator:
             )
 
         # Check stock
-        if not in_stock_vars:
+        if not in_stock_vars and variations:
             out_of_stock_results = [
                 PriceBreakdown(
                     product_id=product_id,
@@ -281,28 +283,22 @@ class ProductPricingComparator:
                 max_savings_vs_worst=0.0
             )
 
-        # 2. Evaluate pricing for each pincode
-        results: List[PriceBreakdown] = []
+        # 2. Evaluate pricing for each pincode (concurrently for fast performance)
+        from concurrent.futures import ThreadPoolExecutor
 
-        for pin in candidate_pins:
-            if use_cache:
-                cached = self.cache.get(product_id, pin)
-                if cached:
-                    results.append(cached)
-                    continue
-
-            breakdown = self._evaluate_single_pincode(
+        def _eval_pin(pin: str) -> PriceBreakdown:
+            return self._evaluate_single_pincode(
                 product_id=product_id,
                 pincode=pin,
                 supplier_id=supplier_id,
-                variation_id=chosen_var["variation_id"],
-                variation_name=chosen_var["variation_name"],
-                base_price=base_price,
-                price_type=price_type
+                base_price=base_price
             )
-            if use_cache:
-                self.cache.set(product_id, pin, breakdown)
-            results.append(breakdown)
+
+        if len(candidate_pins) > 1:
+            with ThreadPoolExecutor(max_workers=min(6, len(candidate_pins))) as executor:
+                results = list(executor.map(_eval_pin, candidate_pins))
+        else:
+            results = [_eval_pin(p) for p in candidate_pins]
 
         # 3. Rank results by final payable price (verified available first)
         verified = [r for r in results if r.status == ComparisonStatus.VERIFIED_AVAILABLE]
@@ -329,18 +325,22 @@ class ProductPricingComparator:
         product_id: int,
         pincode: str,
         supplier_id: int,
-        variation_id: int,
-        variation_name: str,
         base_price: float,
-        price_type: str
+        variation_id: Optional[int] = None,
+        variation_name: Optional[str] = None,
+        price_type: Optional[str] = None
     ) -> PriceBreakdown:
-        """Evaluates pricing breakdown for one pincode via shipping and location quote."""
-        # Fast shipping check first
+        """Evaluates pricing breakdown for one pincode via direct shipping charge quote."""
+        pin_str = str(pincode).strip()
+        loc_meta = ALL_INDIA_PIN_MAP.get(pin_str, {})
+        city = loc_meta.get("city", "")
+        state = loc_meta.get("state", "")
+        zone = loc_meta.get("zone", "")
 
         try:
             ship_info = check_shipping_charges_fast(
                 self.client,
-                dest_pin=pincode,
+                dest_pin=pin_str,
                 product_id=product_id,
                 supplier_id=supplier_id,
                 quantity=1
@@ -348,131 +348,47 @@ class ProductPricingComparator:
         except Exception as e:
             return PriceBreakdown(
                 product_id=product_id,
-                pincode=pincode,
+                pincode=pin_str,
                 status=ComparisonStatus.FAILED,
+                city=city,
+                state=state,
+                zone=zone,
+                displayed_product_price=base_price,
+                final_payable_price=base_price,
                 error_message=f"Shipping query failed: {e}"
             )
 
-        if not ship_info.get("serviceable"):
+        if not ship_info.get("serviceable", True):
             return PriceBreakdown(
                 product_id=product_id,
-                pincode=pincode,
+                pincode=pin_str,
                 status=ComparisonStatus.UNSUPPORTED_PINCODE,
-                error_message=f"Pincode {pincode} is not serviceable."
-            )
-
-        fast_charges = float(ship_info.get("charges") or 0.0)
-        expected_date = ship_info.get("estimated_date") or ship_info.get("expected_delivery")
-
-        # Now get full cart / bill details for accurate discount & UPI pricing
-        try:
-            # Add or ensure product is in cart
-            add_res = add_product_to_cart(
-                self.client,
-                product_id=product_id,
-                supplier_id=supplier_id,
-                variation_id=variation_id,
-                variation_name=variation_name,
-                quantity=1,
-                price_type=price_type
-            )
-            loc_res = update_cart_location(self.client, dest_pin=pincode)
-
-            raw = loc_res.get("raw_result") or {}
-            addr = raw.get("address") or {}
-            city = addr.get("city") or loc_res.get("city") or ""
-            state = addr.get("state") or loc_res.get("state") or ""
-
-            if not city and str(pincode) in ALL_INDIA_PIN_MAP:
-                city = ALL_INDIA_PIN_MAP[str(pincode)]["city"]
-            if not state and str(pincode) in ALL_INDIA_PIN_MAP:
-                state = ALL_INDIA_PIN_MAP[str(pincode)]["state"]
-
-            # Parse components from price_break_up if present
-            price_break_up = raw.get("price_break_up") or []
-            prod_price = 0.0
-            eligible_discounts = 0.0
-            upi_discount = 0.0
-            delivery_charges = float(loc_res.get("delivery_charges", fast_charges))
-
-            for item in price_break_up:
-                item_type = item.get("type", "")
-                item_val = abs(float(item.get("value") or 0.0))
-
-                if item_type == "PRODUCT_PRICE":
-                    prod_price = item_val
-                elif item_type == "DISCOUNT":
-                    # Check sub-details
-                    for d in item.get("details", []):
-                        d_type = d.get("type", "")
-                        d_val = abs(float(d.get("value") or 0.0))
-                        if d_type in ("PREPAID_DISCOUNT", "UPI_DISCOUNT"):
-                            upi_discount += d_val
-                        else:
-                            eligible_discounts += d_val
-                elif item_type == "ADDITIONAL_CHARGES":
-                    for d in item.get("details", []):
-                        if d.get("type") == "DELIVERY_CHARGES":
-                            delivery_charges = abs(float(d.get("value") or 0.0))
-
-            if prod_price == 0.0:
-                prod_price = base_price
-
-            # Check UPI price field
-            cart_total = float(loc_res.get("total", prod_price + delivery_charges))
-            raw_upi_price = loc_res.get("upi_price")
-
-            upi_verified = False
-            if raw_upi_price is not None and float(raw_upi_price) > 0 and float(raw_upi_price) < cart_total:
-                upi_verified = True
-                calc_upi_disc = cart_total - float(raw_upi_price)
-                if upi_discount == 0.0:
-                    upi_discount = calc_upi_disc
-
-            # Final payable calculation
-            final_payable = prod_price + delivery_charges - eligible_discounts - upi_discount
-
-            return PriceBreakdown(
-                product_id=product_id,
-                pincode=pincode,
-                status=ComparisonStatus.VERIFIED_AVAILABLE,
                 city=city,
                 state=state,
-                displayed_product_price=round(prod_price, 2),
-                delivery_charges=round(delivery_charges, 2),
-                eligible_discounts=round(eligible_discounts, 2),
-                payment_method_discounts=round(upi_discount, 2),
-                final_payable_price=round(final_payable, 2),
-                upi_verified_eligible=upi_verified,
-                delivery_days=expected_date,
-                raw_details=loc_res
+                zone=zone,
+                displayed_product_price=base_price,
+                delivery_charges=0.0,
+                final_payable_price=base_price,
+                error_message=f"Pincode {pin_str} is not serviceable."
             )
 
-        except Exception as e:
-            # Fallback to fast shipping charges + base product price if full cart location failed
-            logger.warning(f"Full cart evaluation failed on pin {pincode}: {e}. Falling back to shipping quote.")
-            fallback_city = ""
-            fallback_state = ""
-            fallback_zone = ""
-            if str(pincode) in ALL_INDIA_PIN_MAP:
-                fallback_city = ALL_INDIA_PIN_MAP[str(pincode)].get("city", "")
-                fallback_state = ALL_INDIA_PIN_MAP[str(pincode)].get("state", "")
-                fallback_zone = ALL_INDIA_PIN_MAP[str(pincode)].get("zone", "")
+        delivery_charges = float(ship_info.get("charges") or 0.0)
+        expected_date = ship_info.get("estimated_date") or ship_info.get("expected_delivery")
+        final_payable = base_price + delivery_charges
 
-            final_payable = base_price + fast_charges
-            return PriceBreakdown(
-                product_id=product_id,
-                pincode=pincode,
-                status=ComparisonStatus.VERIFIED_AVAILABLE,
-                city=fallback_city,
-                state=fallback_state,
-                zone=fallback_zone,
-                displayed_product_price=round(base_price, 2),
-                delivery_charges=round(fast_charges, 2),
-                eligible_discounts=0.0,
-                payment_method_discounts=0.0,
-                final_payable_price=round(final_payable, 2),
-                upi_verified_eligible=False,
-                delivery_days=expected_date,
-                error_message=f"Cart quote fallback: {e}"
-            )
+        return PriceBreakdown(
+            product_id=product_id,
+            pincode=pin_str,
+            status=ComparisonStatus.VERIFIED_AVAILABLE,
+            city=city,
+            state=state,
+            zone=zone,
+            displayed_product_price=round(base_price, 2),
+            delivery_charges=round(delivery_charges, 2),
+            eligible_discounts=0.0,
+            payment_method_discounts=0.0,
+            final_payable_price=round(final_payable, 2),
+            upi_verified_eligible=False,
+            delivery_days=expected_date,
+            raw_details=ship_info
+        )

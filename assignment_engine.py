@@ -291,7 +291,7 @@ class AssignmentExecutor:
                     print(f"[*] Account {acc_id}: Adding address at pincode {assignment.assigned_address.get('pin')}...", flush=True)
                     addr_res = add_address(client, assignment.assigned_address)
                     item_res["registered_address_id"] = addr_res.get("id")
-                    print(f"[✓] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
+                    print(f"[+] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
 
                     # Execute product additions
                     added_prods = []
@@ -325,7 +325,7 @@ class AssignmentExecutor:
 
                     item_res["added_products"] = added_prods
                     item_res["status"] = "SUCCESS"
-                    print(f"[✓] Account {acc_id}: Execution completed successfully!", flush=True)
+                    print(f"[+] Account {acc_id}: Execution completed successfully!", flush=True)
 
                 except Exception as e:
                     logger.error(f"Error executing assignment for account {acc_id}: {e}")

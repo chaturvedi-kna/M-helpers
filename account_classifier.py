@@ -125,13 +125,6 @@ def extract_order_history_info(data: Dict[str, Any]) -> Tuple[Optional[int], str
         if list_key in data and isinstance(data[list_key], list):
             return len(data[list_key]), f"Found '{list_key}' with {len(data[list_key])} entries", True
 
-    # Case 5: Referral / first order boolean indicators
-    identity = data.get("identity") if isinstance(data.get("identity"), dict) else {}
-    if data.get("is_first_order") is False or identity.get("is_first_order") is False:
-        return 1, "Account metadata indicates first order already used (is_first_order=False)", True
-    if data.get("_referral_done") is True or identity.get("_referral_done") is True:
-        return 1, "Account metadata indicates referral order already completed (_referral_done=True)", True
-
     # Order history information is completely absent
     return None, "Order history information is missing from the record", False
 
@@ -406,9 +399,18 @@ def classify_accounts_from_source(
     unknown_list: List[AccountRecordResult] = []
     errors_list: List[Dict[str, Any]] = []
 
-    for rec in records:
-        src_ref = rec.get("source_reference", "<inline>")
-        res = classify_account_data(rec, source_reference=src_ref, live=live)
+    def _worker(rec_item):
+        src_ref = rec_item.get("source_reference", "<inline>")
+        return classify_account_data(rec_item, source_reference=src_ref, live=live)
+
+    if live and len(records) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(6, len(records))) as executor:
+            classified_results = list(executor.map(_worker, records))
+    else:
+        classified_results = [_worker(r) for r in records]
+
+    for res in classified_results:
         if not res.is_valid_schema:
             errors_list.append({
                 "source": res.source_file,
