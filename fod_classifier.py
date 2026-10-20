@@ -68,6 +68,31 @@ class FODClassificationSummary:
     records_by_tier: Dict[str, List[FODRecord]] = field(default_factory=dict)
     invalid_records: List[Dict[str, Any]] = field(default_factory=list)
 
+    def get_accounts_by_tier(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Returns map of tier_name -> list of original account JSON dicts."""
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for tier, records in self.records_by_tier.items():
+            acc_list = []
+            for r in records:
+                if r.raw_data and isinstance(r.raw_data, dict):
+                    acc_copy = dict(r.raw_data)
+                    acc_copy["advertised_tier"] = r.advertised_tier
+                    acc_copy["advertised_amount"] = r.advertised_amount
+                    if r.offer_bucket:
+                        acc_copy["offer_bucket"] = r.offer_bucket
+                    acc_list.append(acc_copy)
+                else:
+                    acc_list.append({
+                        "user_id": r.account_id,
+                        "mobile": r.mobile,
+                        "source_reference": r.source_reference,
+                        "advertised_tier": r.advertised_tier,
+                        "advertised_amount": r.advertised_amount,
+                        "offer_bucket": r.offer_bucket
+                    })
+            out[tier] = acc_list
+        return out
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "summary": {
@@ -81,6 +106,7 @@ class FODClassificationSummary:
             "records": [
                 r.to_dict() for records in self.records_by_tier.values() for r in records
             ],
+            "accounts_by_tier": self.get_accounts_by_tier(),
             "invalid_records": self.invalid_records
         }
 
@@ -423,7 +449,8 @@ def fetch_live_fod(
             raw_offer_text=None,
             eligibility_status=EligibilityStatus.UNVERIFIED,
             eligibility_reason=f"Failed to query live Meesho API: {e}",
-            validation_errors=[str(e)]
+            validation_errors=[str(e)],
+            raw_data=acc
         )
 
     # Classify the live response
@@ -433,6 +460,7 @@ def fetch_live_fod(
     )
     record.account_id = str(acc.get("user_id") or "") or None
     record.mobile = str(acc.get("mobile") or "") or None
+    record.raw_data = acc
     return record
 
 

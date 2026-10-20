@@ -700,6 +700,71 @@ class TestEnhancements(unittest.TestCase):
         self.assertTrue(addr_data["success"])
         self.assertEqual(addr_data["mode"], "address_only")
 
+    @patch("web_ui.classify_fod_from_source")
+    def test_fod_tier_grouping_and_cart_seeding_integration(self, mock_classify):
+        """
+        Verify FOD tier grouping separates 170 off vs 190 off accounts,
+        and accounts_by_tier allows targeted cart seeding of just 170 off accounts.
+        """
+        from web_ui import app
+        test_client = app.test_client()
+
+        acc1 = {"user_id": 8001, "mobile": "9999908001", "xo": "mock.1", "advertised_tier": "tier_170", "advertised_amount": 170}
+        acc2 = {"user_id": 8002, "mobile": "9999908002", "xo": "mock.2", "advertised_tier": "tier_170", "advertised_amount": 170}
+        acc3 = {"user_id": 8003, "mobile": "9999908003", "xo": "mock.3", "advertised_tier": "tier_190", "advertised_amount": 190}
+        acc4 = {"user_id": 8004, "mobile": "9999908004", "xo": "mock.4", "advertised_tier": "tier_50", "advertised_amount": 50}
+
+        mock_summary = MagicMock()
+        mock_summary.total_scanned = 4
+        mock_summary.tier_counts = {"tier_170": 2, "tier_190": 1, "tier_50": 1}
+        mock_summary.to_dict.return_value = {
+            "summary": {
+                "total_scanned": 4,
+                "tier_counts": mock_summary.tier_counts
+            },
+            "records": []
+        }
+        mock_summary.get_accounts_by_tier.return_value = {
+            "tier_170": [acc1, acc2],
+            "tier_190": [acc3],
+            "tier_50": [acc4]
+        }
+        mock_classify.return_value = mock_summary
+
+        resp = test_client.post("/api/classify-fod", json={"source": [acc1, acc2, acc3, acc4]})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["success"])
+
+        # Check tier grouping
+        accounts_by_tier = data.get("accounts_by_tier", {})
+        self.assertIn("tier_170", accounts_by_tier)
+        self.assertIn("tier_190", accounts_by_tier)
+        self.assertIn("tier_50", accounts_by_tier)
+
+        tier_170_accounts = accounts_by_tier["tier_170"]
+        tier_190_accounts = accounts_by_tier["tier_190"]
+        self.assertEqual(len(tier_170_accounts), 2)
+        self.assertEqual(len(tier_190_accounts), 1)
+
+        # Forward ONLY 170 off tier accounts to cart seeding
+        cart_resp = test_client.post("/api/run-assignment", json={
+            "accounts_source": tier_170_accounts,
+            "mode": "cart_only",
+            "cart_set_name": "Cart Set 1",
+            "products_source": ["624039638"],
+            "seed": 42,
+            "count": 1,
+            "dry_run": True
+        })
+        self.assertEqual(cart_resp.status_code, 200)
+        cart_data = cart_resp.get_json()
+        self.assertTrue(cart_data["success"])
+        self.assertEqual(cart_data["report"]["total_accounts"], 2)
+        # Verify account_ids seeded are exactly the 170 off accounts
+        assigned_account_ids = [res["account_id"] for res in cart_data["report"]["results"]]
+        self.assertEqual(set(assigned_account_ids), {"8001", "8002"})
+
 
 if __name__ == "__main__":
     unittest.main()

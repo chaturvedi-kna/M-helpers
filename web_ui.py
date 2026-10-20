@@ -187,21 +187,23 @@ HTML_TEMPLATE = """
   <div class="flex-1 flex overflow-hidden">
     <!-- Sidebar Navigation -->
     <aside class="w-64 bg-slate-900/70 border-r border-slate-800 p-4 space-y-1.5 select-none">
-      <button type="button" onclick="switchTab('tab-pricing')" id="btn-pricing" class="nav-btn active">
-        <i class="fa-solid fa-tags w-5 text-center text-rose-400"></i>
-        <span>Pricing Comparator</span>
+      <div class="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Core Workflow</div>
+      <button type="button" onclick="switchTab('tab-accounts')" id="btn-accounts" class="nav-btn active">
+        <i class="fa-solid fa-users-gear w-5 text-center text-blue-400"></i>
+        <span>1. Order Classification</span>
       </button>
       <button type="button" onclick="switchTab('tab-fod')" id="btn-fod" class="nav-btn">
         <i class="fa-solid fa-gift w-5 text-center text-amber-400"></i>
-        <span>Live FOD Explorer</span>
-      </button>
-      <button type="button" onclick="switchTab('tab-accounts')" id="btn-accounts" class="nav-btn">
-        <i class="fa-solid fa-users-gear w-5 text-center text-blue-400"></i>
-        <span>Account Classification</span>
+        <span>2. FOD Tier Classification</span>
       </button>
       <button type="button" onclick="switchTab('tab-assignment')" id="btn-assignment" class="nav-btn">
         <i class="fa-solid fa-cubes-stacked w-5 text-center text-purple-400"></i>
-        <span>Bulk Assignment</span>
+        <span>3. Cart / Address Seeding</span>
+      </button>
+      <div class="pt-4 pb-1.5 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Utilities</div>
+      <button type="button" onclick="switchTab('tab-pricing')" id="btn-pricing" class="nav-btn">
+        <i class="fa-solid fa-tags w-5 text-center text-rose-400"></i>
+        <span>Pricing Comparator</span>
       </button>
       <button type="button" onclick="switchTab('tab-sessions')" id="btn-sessions" class="nav-btn">
         <i class="fa-solid fa-key w-5 text-center text-emerald-400"></i>
@@ -213,9 +215,9 @@ HTML_TEMPLATE = """
     <main class="flex-1 p-6 overflow-y-auto">
 
       <!-- ======================================================== -->
-      <!-- TAB 1: PRICING COMPARATOR                                -->
+      <!-- TAB: PRICING COMPARATOR                                  -->
       <!-- ======================================================== -->
-      <section id="tab-pricing" class="space-y-6">
+      <section id="tab-pricing" class="space-y-6 hidden">
         <div class="card p-6">
           <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
             <div>
@@ -480,9 +482,9 @@ HTML_TEMPLATE = """
       </section>
 
       <!-- ======================================================== -->
-      <!-- TAB 3: ACCOUNT CLASSIFICATION                            -->
+      <!-- TAB 1: ACCOUNT / ORDER CLASSIFICATION                    -->
       <!-- ======================================================== -->
-      <section id="tab-accounts" class="space-y-6 hidden">
+      <section id="tab-accounts" class="space-y-6">
         <div class="card p-6">
           <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
             <div>
@@ -1273,6 +1275,54 @@ HTML_TEMPLATE = """
             <div class="text-xs text-slate-300 mb-3">
               <strong>Tiers Found:</strong> ${Object.entries(rep.tier_counts || {}).map(([k, v]) => `<span class="bg-amber-950/70 border border-amber-800 text-amber-300 px-2 py-0.5 rounded mr-1">${k}: ${v}</span>`).join(' ')}
             </div>
+
+            <!-- Interactive FOD Tier Cards Grid -->
+            <div class="mt-4 mb-4">
+              <div class="flex items-center justify-between mb-2.5">
+                <div>
+                  <h5 class="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                    <i class="fa-solid fa-layer-group"></i>
+                    <span>Categorized Discount Tiers (Per-Tier Download & 1-Click Cart Seeding)</span>
+                  </h5>
+                  <p class="text-[11px] text-slate-400 mt-0.5">Select a tier below (e.g. ₹170 OFF) to forward directly to Cart Seeding without re-uploading, or download individual tier JSONs.</p>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                ${Object.entries(data.accounts_by_tier || {}).map(([tierKey, accs]) => {
+                  let title = tierKey.replace('tier_', '₹') + ' OFF';
+                  if (tierKey === 'no_offer') title = 'No Offer / Baseline';
+                  if (tierKey === 'unclassified') title = 'Unclassified';
+                  const count = accs.length;
+                  const isHighTier = tierKey.includes('170') || tierKey.includes('190');
+                  const borderClass = isHighTier ? 'border-amber-600/70 bg-amber-950/20' : 'border-slate-800 bg-slate-900/80';
+                  const badgeClass = isHighTier ? 'bg-amber-950 text-amber-300 border-amber-700' : 'bg-slate-800 text-slate-300 border-slate-700';
+
+                  return `
+                    <div class="p-3.5 rounded-xl border ${borderClass} flex flex-col justify-between shadow-md">
+                      <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeClass}">
+                            ${title}
+                          </span>
+                          <span class="font-mono text-xs font-bold text-white bg-slate-800 px-2 py-0.5 rounded">${count} Account${count === 1 ? '' : 's'}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mb-3">
+                          ${tierKey === 'no_offer' ? 'Accounts without active first-order discount.' : `Verified live ${title} promotional discount.`}
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+                        <button onclick="downloadTierAccountsJson('${tierKey}')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 border border-slate-700 transition" title="Download ${tierKey}_${count}.json">
+                          <i class="fa-solid fa-download text-amber-400"></i> Download JSON
+                        </button>
+                        <button onclick="forwardTierToCartSeeding('${tierKey}')" class="flex-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow" title="Forward ${count} accounts to Cart Seeding">
+                          <i class="fa-solid fa-cart-plus"></i> Forward to Cart &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
             ${data.records && data.records.length > 0 ? `
               <div class="mt-3 overflow-x-auto max-h-96 border border-slate-800 rounded-lg">
                 <table class="w-full text-xs text-left text-slate-300">
@@ -1307,6 +1357,65 @@ HTML_TEMPLATE = """
         spinner.classList.add('hidden');
         btn.disabled = false;
         resultsDiv.innerHTML = `<div class="text-rose-400 text-sm">Error: ${err.message || err}</div>`;
+      }
+    }
+
+    function downloadTierAccountsJson(tierKey) {
+      const byTier = window.lastFodSummary && window.lastFodSummary.accounts_by_tier;
+      const accs = byTier ? byTier[tierKey] : null;
+      if (!accs || accs.length === 0) {
+        alert("No accounts found for tier: " + tierKey);
+        return;
+      }
+      downloadJsonData(accs, `${tierKey}_${accs.length}.json`);
+    }
+
+    function forwardTierToCartSeeding(tierKey) {
+      const byTier = window.lastFodSummary && window.lastFodSummary.accounts_by_tier;
+      const accs = byTier ? byTier[tierKey] : null;
+      if (!accs || accs.length === 0) {
+        alert("No accounts found for tier: " + tierKey);
+        return;
+      }
+
+      window.parsedAccounts['assign'] = accs;
+      switchTab('tab-assignment');
+
+      const pasteRadio = document.querySelector('input[name="assign-input-mode"][value="paste"]');
+      if (pasteRadio) {
+        pasteRadio.checked = true;
+        toggleAccountInputMode('assign');
+      }
+      const ta = document.getElementById('assign-paste-textarea');
+      if (ta) {
+        ta.value = JSON.stringify(accs, null, 2);
+      }
+
+      const cartRadio = document.querySelector('input[name="seeding-mode"][value="cart_only"]');
+      if (cartRadio) {
+        cartRadio.checked = true;
+        toggleSeedingMode();
+      }
+
+      let tierTitle = tierKey.replace('tier_', '₹') + ' OFF';
+      if (tierKey === 'no_offer') tierTitle = 'No Offer';
+
+      const statusBox = document.getElementById('assign-account-status');
+      if (statusBox) {
+        statusBox.className = 'mt-3 p-3 bg-purple-950/80 border border-purple-700 text-purple-200 text-xs rounded-lg flex items-center justify-between';
+        statusBox.innerHTML = `
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-circle-check text-emerald-400 text-base"></i>
+            <span><strong>${accs.length} Fresh Accounts</strong> loaded from <strong>${tierTitle} Tier</strong> for Cart Seeding.</span>
+          </div>
+          <span class="text-[11px] font-mono text-purple-300">Mode: Cart Only</span>
+        `;
+        statusBox.classList.remove('hidden');
+      }
+
+      const prodInput = document.getElementById('assign-products-input');
+      if (prodInput) {
+        prodInput.focus();
       }
     }
 
@@ -1394,6 +1503,9 @@ HTML_TEMPLATE = """
           <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
             <span class="flex items-center gap-1.5"><i class="fa-solid fa-circle-check text-emerald-400"></i> Verified with live Meesho order history API (/api/3.0/user/orders)</span>
             <div class="flex items-center flex-wrap gap-2">
+              <button onclick="forwardFreshToFodCheck()" ${s.fresh_count === 0 ? 'disabled' : ''} class="bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-amber-950 transition transform hover:scale-[1.02]">
+                <i class="fa-solid fa-bolt"></i> Check FOD on Fresh (${s.fresh_count}) &rarr;
+              </button>
               <button onclick="downloadFreshAccountsJson()" ${s.fresh_count === 0 ? 'disabled' : ''} class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded text-xs flex items-center gap-1.5 font-medium transition shadow">
                 <i class="fa-solid fa-download"></i> Download fresh_${s.fresh_count}.json
               </button>
@@ -1432,6 +1544,32 @@ HTML_TEMPLATE = """
       const accs = window.lastAccSummary && window.lastAccSummary.combined_accounts ? window.lastAccSummary.combined_accounts : [];
       const count = accs.length;
       downloadJsonData(accs, `combined_${count}.json`);
+    }
+
+    function forwardFreshToFodCheck() {
+      const accs = window.lastAccSummary && window.lastAccSummary.fresh_accounts ? window.lastAccSummary.fresh_accounts : [];
+      if (!accs || accs.length === 0) {
+        alert("No fresh accounts found to check FOD.");
+        return;
+      }
+      switchTab('tab-fod');
+      const radio = document.querySelector('input[name="fod-input-mode"][value="bulk"]');
+      if (radio) {
+        radio.checked = true;
+        toggleFodMode();
+      }
+      const bulkRadio = document.querySelector('input[name="fod-bulk-input-mode"][value="paste"]');
+      if (bulkRadio) {
+        bulkRadio.checked = true;
+        toggleAccountInputMode('fod-bulk');
+      }
+      const ta = document.getElementById('fod-bulk-paste-textarea');
+      if (ta) {
+        ta.value = JSON.stringify(accs, null, 2);
+      }
+      window.parsedAccounts['fod-bulk'] = accs;
+      setAccountStatus('fod-bulk', `✓ Loaded ${accs.length} Fresh Accounts from Order Classification. Starting live FOD scan...`, 'amber');
+      runBulkFodClassification();
     }
 
     function sendFreshToSeeding() {
@@ -1492,7 +1630,7 @@ HTML_TEMPLATE = """
 
     function updateCartCounter() {
       const text = document.getElementById('assign-products-input').value;
-      const prods = text.split(/[\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
+      const prods = text.split(/[\\r\\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
       document.getElementById('cart-items-count').textContent = prods.length;
     }
 
@@ -1527,7 +1665,7 @@ HTML_TEMPLATE = """
       let productsSource = null;
       if (mode === 'cart_only' || mode === 'both') {
         const prodText = document.getElementById('assign-products-input').value.trim();
-        const prods = prodText.split(/[\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
+        const prods = prodText.split(/[\\r\\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
         if (prods.length === 0) {
           area.innerHTML = `<div class="p-3 bg-rose-950 text-rose-300 text-xs rounded"><strong>Error:</strong> Please enter at least one product ID or URL for ${cartSetName}. No default products are used.</div>`;
           area.classList.remove('hidden');
@@ -1803,7 +1941,7 @@ HTML_TEMPLATE = """
 
     // Initialize Dashboard
     document.addEventListener('DOMContentLoaded', () => {
-      switchTab('tab-pricing');
+      switchTab('tab-accounts');
       loadGlobalProxyConfig();
     });
   </script>
@@ -1943,11 +2081,12 @@ def api_classify_fod():
             output_dir=None,
             format_type=format_type
         )
-        print(f"[+] /api/classify-fod: Completed {summary.total_scanned} accounts", flush=True)
+        print(f"[+] /api/classify-fod: Completed {summary.total_scanned} accounts (Tiers: {summary.tier_counts})", flush=True)
         return jsonify({
             "success": True,
             "summary": summary.to_dict()["summary"],
             "records": summary.to_dict().get("records", []),
+            "accounts_by_tier": summary.get_accounts_by_tier(),
             "format_type": format_type
         })
     except Exception as e:
