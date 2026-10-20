@@ -17,6 +17,7 @@ def check_shipping_charges_fast(
     """
     Lightweight check for shipping charges and serviceability for a specific product & supplier
     without mutating the current cart session.
+    Never returns fake 0 delivery charges if Meesho shipping quote fails or times out.
     """
     pin_str = str(dest_pin).strip()
     params = {
@@ -26,25 +27,33 @@ def check_shipping_charges_fast(
         "supplier_id": int(supplier_id)
     }
 
-    try:
-        res = client.api_call("GET", "/api/1.0/shipping", params=params)
-        shipping = res.get("shipping") or res.get("shipping_2") or {}
-        if shipping and ("charges" in shipping or "serviceable" in shipping):
-            return {
-                "pincode": pin_str,
-                "serviceable": shipping.get("serviceable", True),
-                "charges": float(shipping.get("charges") or 0.0),
-                "expected_delivery": shipping.get("expected_delivery_time"),
-                "estimated_date": shipping.get("estimated_delivery_date"),
-                "account_specific": True
-            }
-    except Exception:
-        pass
+    # 1. Primary authenticated / client-managed query with retry
+    for attempt in range(2):
+        try:
+            res = client.api_call("GET", "/api/1.0/shipping", params=params)
+            shipping = res.get("shipping") or res.get("shipping_2") or {}
+            if shipping and ("charges" in shipping or "serviceable" in shipping):
+                raw_charges = shipping.get("charges")
+                charges_val = float(raw_charges) if raw_charges is not None else 0.0
+                is_serv = shipping.get("serviceable", True)
+                return {
+                    "pincode": pin_str,
+                    "serviceable": is_serv,
+                    "charges": charges_val,
+                    "charges_verified": True,
+                    "expected_delivery": shipping.get("expected_delivery_time"),
+                    "estimated_date": shipping.get("estimated_delivery_date"),
+                    "account_specific": True
+                }
+        except Exception:
+            pass
 
-    # Direct query fallback using client's session headers or anonymous headers
+    # 2. Direct query fallback with complete mobile headers
     try:
+        import uuid
         import requests
         import proxy_manager
+        from config import DEFAULT_AUTHORIZATION, APP_VERSION, APP_VERSION_CODE, APP_SDK_VERSION
         from auth import build_meesho_headers
 
         if client and hasattr(client, "account_data") and client.account_data:
@@ -52,60 +61,60 @@ def check_shipping_charges_fast(
             is_acc = True
         else:
             sess_headers = {
-                "Authorization": "32c4d8137cn9eb493a1921f203173080",
-                "App-Version": "29.6",
-                "App-Version-Code": "870",
+                "Authorization": DEFAULT_AUTHORIZATION,
+                "App-Version": APP_VERSION,
+                "App-Version-Code": APP_VERSION_CODE,
+                "Instance-Id": uuid.uuid4().hex,
                 "Country-Iso": "in",
                 "Application-Id": "com.meesho.supply",
+                "App-Session-Id": uuid.uuid4().hex,
+                "App-Sdk-Version": APP_SDK_VERSION,
                 "App-Client-Id": "android",
+                "App-Iso-Language-Code": "en",
                 "Meesho-User-Context": "anonymous",
-                "User-Agent": "okhttp/4.9.0"
+                "User-Agent": "okhttp/4.9.0",
+                "Accept": "application/json"
             }
             is_acc = False
 
         sess = requests.Session()
         sess.headers.update(sess_headers)
-        r = proxy_manager.request_with_retry(sess, "GET", "https://prod.meeshoapi.com/api/1.0/shipping", params=params, timeout=10)
+        r = proxy_manager.request_with_retry(
+            sess,
+            "GET",
+            f"{client.api_host if client and hasattr(client, 'api_host') else 'https://prod.meeshoapi.com'}/api/1.0/shipping",
+            params=params,
+            timeout=10
+        )
         if r.status_code == 200:
             data = r.json()
             shipping = data.get("shipping") or data.get("shipping_2") or {}
-            if shipping:
+            if shipping and ("charges" in shipping or "serviceable" in shipping):
+                raw_charges = shipping.get("charges")
+                charges_val = float(raw_charges) if raw_charges is not None else 0.0
                 return {
                     "pincode": pin_str,
                     "serviceable": shipping.get("serviceable", True),
-                    "charges": float(shipping.get("charges") or 0.0),
+                    "charges": charges_val,
+                    "charges_verified": True,
                     "expected_delivery": shipping.get("expected_delivery_time"),
                     "estimated_date": shipping.get("estimated_delivery_date"),
                     "account_specific": is_acc
                 }
     except Exception:
         pass
-    except Exception:
-        pass
 
-    # Fallback to delivery-location verification
-    try:
-        from address import verify_delivery_location
-        loc = verify_delivery_location(client, pin_str)
-        if loc and (loc.get("city") or loc.get("pincode")):
-            return {
-                "pincode": pin_str,
-                "serviceable": True,
-                "charges": 0,
-                "expected_delivery": "Standard Delivery",
-                "estimated_date": None
-            }
-    except Exception:
-        pass
-
-    # Postal verification fallback
-    is_valid_pin = bool(len(pin_str) == 6 and pin_str.isdigit() and pin_str[0] in "123456789")
+    # 3. Explicit error result when logistics endpoint is unreachable or times out
+    # DO NOT invent fake 0 charges; mark as unverified so ranking is never corrupted.
     return {
         "pincode": pin_str,
-        "serviceable": is_valid_pin,
-        "charges": 0,
-        "expected_delivery": "Standard Delivery" if is_valid_pin else None,
-        "estimated_date": None
+        "serviceable": False,
+        "charges": None,
+        "charges_verified": False,
+        "expected_delivery": None,
+        "estimated_date": None,
+        "account_specific": False,
+        "error": f"Shipping charges unavailable for pincode {pin_str} (network or logistics timeout)"
     }
 
 

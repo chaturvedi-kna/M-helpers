@@ -1113,6 +1113,8 @@ HTML_TEMPLATE = """
           const ac = rep.account_context;
           const userLabel = ac.mobile || ac.user_id || ac.account_identifier || 'Target Account';
           const fodBadge = ac.fod_tier ? `<span class="px-2 py-0.5 rounded text-xs bg-amber-950 text-amber-300 border border-amber-800 font-semibold"><i class="fa-solid fa-gift mr-1"></i>FOD: ${ac.fod_tier} (₹${ac.fod_discount} off)</span>` : '<span class="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">Standard Account</span>';
+          const liveBadge = (ac.meesho_live_discount > 0) ? `<span class="px-2 py-0.5 rounded text-xs bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold"><i class="fa-solid fa-tag mr-1"></i>Meesho Live Discount: ₹${ac.meesho_live_discount.toFixed(2)} off</span>` : '';
+          const prepBadge = (ac.meesho_prepaid_discount > 0) ? `<span class="px-2 py-0.5 rounded text-xs bg-indigo-950 text-indigo-300 border border-indigo-800 font-semibold"><i class="fa-solid fa-bolt mr-1"></i>Prepaid Offer: ₹${ac.meesho_prepaid_discount.toFixed(2)} off</span>` : '';
           ctxBox.innerHTML = `
             <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
               <div class="flex items-center flex-wrap gap-2.5">
@@ -1121,8 +1123,10 @@ HTML_TEMPLATE = """
                 </span>
                 <span class="text-slate-300">Target Account: <strong class="text-white font-mono">${userLabel}</strong></span>
                 ${fodBadge}
+                ${liveBadge}
+                ${prepBadge}
               </div>
-              <span class="text-slate-400 font-mono text-[11px]"><i class="fa-solid fa-bolt text-rose-400 mr-1"></i>Delivery & pricing verified with target account session</span>
+              <span class="text-slate-400 font-mono text-[11px]"><i class="fa-solid fa-bolt text-rose-400 mr-1"></i>Direct Meesho Dynamic Quote</span>
             </div>
           `;
         } else {
@@ -1131,25 +1135,26 @@ HTML_TEMPLATE = """
 
         rep.results.forEach((r, idx) => {
           const tr = document.createElement('tr');
-          const isCheapest = idx === 0 && r.status === 'VERIFIED_AVAILABLE';
+          const isAvailable = r.status === 'VERIFIED_AVAILABLE';
+          const isCheapest = idx === 0 && isAvailable;
           const loc = r.city ? `${r.city}, ${r.state}` : (r.state || 'N/A');
           const accDiscount = r.account_discount || r.eligible_discounts || 0;
 
-          tr.className = isCheapest ? 'bg-emerald-950/30' : '';
+          tr.className = isCheapest ? 'bg-emerald-950/30' : (isAvailable ? '' : 'bg-slate-900/40 opacity-75');
           tr.innerHTML = `
-            <td class="py-2.5 px-3 font-semibold ${isCheapest ? 'text-emerald-400 font-bold' : 'text-slate-400'}">#${idx + 1}</td>
+            <td class="py-2.5 px-3 font-semibold ${isCheapest ? 'text-emerald-400 font-bold' : 'text-slate-400'}">${isAvailable ? '#' + (idx + 1) : '-'}</td>
             <td class="py-2.5 px-3 font-mono font-medium">${r.pincode}</td>
             <td class="py-2.5 px-3 text-xs text-slate-300">${loc}</td>
             <td class="py-2.5 px-3">₹${r.displayed_product_price.toFixed(2)}</td>
-            <td class="py-2.5 px-3 font-mono">₹${r.delivery_charges.toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-mono ${isAvailable ? '' : 'text-rose-400 text-xs'}">${isAvailable ? '₹' + r.delivery_charges.toFixed(2) : 'N/A'}</td>
             <td class="py-2.5 px-3 font-semibold ${accDiscount > 0 ? 'text-emerald-400' : 'text-slate-500'}">${accDiscount > 0 ? '-₹' + accDiscount.toFixed(2) : '₹0.00'}</td>
             <td class="py-2.5 px-3">
-              <div class="font-bold text-rose-400">₹${r.final_payable_price.toFixed(2)}</div>
-              ${r.prepaid_payable_price ? `<div class="text-[11px] text-emerald-400 font-mono font-medium" title="Price with online/UPI prepaid offer">Prepaid: ₹${r.prepaid_payable_price.toFixed(2)}</div>` : ''}
+              <div class="font-bold ${isAvailable ? 'text-rose-400' : 'text-slate-400'}">${isAvailable ? '₹' + r.final_payable_price.toFixed(2) : 'N/A'}</div>
+              ${(isAvailable && r.prepaid_payable_price) ? `<div class="text-[11px] text-emerald-400 font-mono font-medium" title="Price with online/UPI prepaid offer">Prepaid: ₹${r.prepaid_payable_price.toFixed(2)}</div>` : ''}
             </td>
             <td class="py-2.5 px-3">
-              <span class="px-2 py-0.5 rounded text-[10px] ${r.status === 'VERIFIED_AVAILABLE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}">
-                <i class="fa-solid ${r.account_verified ? 'fa-check-double text-emerald-400' : 'fa-circle-xmark'} mr-1"></i>${r.account_verified ? 'Account Verified' : r.status}
+              <span class="px-2 py-0.5 rounded text-[10px] ${isAvailable ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}" title="${r.error_message || ''}">
+                <i class="fa-solid ${isAvailable ? (r.account_verified ? 'fa-check-double text-emerald-400' : 'fa-circle-check') : 'fa-circle-xmark'} mr-1"></i>${isAvailable ? (r.account_verified ? 'Account Verified' : 'Verified Available') : (r.status === 'UNSUPPORTED_PINCODE' ? 'Unserviceable' : 'Logistics Timeout')}
               </span>
             </td>
           `;

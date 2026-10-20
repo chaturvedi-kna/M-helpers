@@ -207,6 +207,104 @@ class PricingCache:
         self._cache.clear()
 
 
+def fetch_live_meesho_product_quote(
+    client: MeeshoClient,
+    product_id: int,
+    supplier_id: int,
+    base_price: float,
+    variation_id: Optional[int] = None,
+    variation_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Fetches the live dynamic discount and prepaid/UPI discount directly from Meesho's backend
+    using a single one-off preview quote against the target product and authenticated account session.
+    Completely isolated from persistent cart session.
+    """
+    quote_info = {
+        "account_discount": 0.0,
+        "prepaid_discount": 0.0,
+        "discount_source": "none",
+        "raw_breakup": []
+    }
+
+    acc_data = getattr(client, "account_data", {}) or {}
+    has_auth = bool(acc_data.get("xo") or acc_data.get("ox"))
+
+    # 1. Primary: Authenticated preview quote via POST /api/1.0/cart/add with identifier "buy_now"
+    if has_auth and client:
+        original_cart_session = getattr(client, "cart_session", None)
+        try:
+            user_id = acc_data.get("user_id")
+            preview_payload = {
+                "context": "pdp",
+                "identifier": "buy_now",
+                "cart_session": None,
+                "replaceable": False,
+                "items": [{
+                    "identifier": "buy_now",
+                    "product_id": int(product_id),
+                    "supplier_id": int(supplier_id) if supplier_id else 0,
+                    "variation_id": variation_id,
+                    "variation": variation_name or "Free Size",
+                    "quantity": 1,
+                    "selected_price_type_id": "basic_return_price",
+                    "client_metadata": None
+                }],
+                "address_id": None,
+                "user_id": int(user_id) if (user_id and str(user_id).isdigit()) else None
+            }
+            res = client.api_call("POST", "/api/1.0/cart/add", payload=preview_payload)
+            # Restore persistent cart session immediately
+            if hasattr(client, "cart_session"):
+                client.cart_session = original_cart_session
+
+            if res and res.get("result"):
+                result = res.get("result", {})
+                price_break_up = result.get("price_break_up") or []
+                quote_info["raw_breakup"] = price_break_up
+
+                # Extract live discounts calculated dynamically by Meesho
+                live_discount = 0.0
+                for item in price_break_up:
+                    if item.get("type") == "DISCOUNT":
+                        live_discount += abs(float(item.get("value") or 0.0))
+
+                eff_total = float(result.get("effective_total") or 0.0)
+                deferred = float(result.get("effective_total_for_deferred_payment") or result.get("effective_total_for_upi_plugin") or 0.0)
+
+                if live_discount > 0:
+                    quote_info["account_discount"] = round(live_discount, 2)
+                    quote_info["discount_source"] = "meesho_live_quote"
+
+                if eff_total > 0 and deferred > 0 and eff_total > deferred:
+                    quote_info["prepaid_discount"] = round(eff_total - deferred, 2)
+                    if quote_info["discount_source"] == "none":
+                        quote_info["discount_source"] = "meesho_live_quote"
+        except Exception as e:
+            if hasattr(client, "cart_session"):
+                client.cart_session = original_cart_session
+            logger.debug(f"Live cart/add preview quote bypassed: {e}")
+
+    # 2. Secondary check: /api/3.0/product/dynamic for supplier's live prepaid discount
+    if quote_info["prepaid_discount"] <= 0 and client:
+        try:
+            dyn_path = f"/api/3.0/product/dynamic?id={product_id}&context=search&origin=catalog_search_results"
+            dyn_res = client.api_call("GET", dyn_path)
+            if dyn_res and dyn_res.get("product"):
+                suppliers = dyn_res.get("product", {}).get("suppliers") or []
+                target_sup = next((s for s in suppliers if s.get("supplier_id") == supplier_id), suppliers[0] if suppliers else None)
+                if target_sup:
+                    p_disc = float(target_sup.get("prepaid_total_discount_in_rs") or target_sup.get("total_discount_in_rs") or 0.0)
+                    if p_disc > 0:
+                        quote_info["prepaid_discount"] = round(p_disc, 2)
+                        if quote_info["discount_source"] == "none":
+                            quote_info["discount_source"] = "meesho_dynamic_catalog"
+        except Exception as de:
+            logger.debug(f"Live product/dynamic lookup bypassed: {de}")
+
+    return quote_info
+
+
 class ProductPricingComparator:
     """
     Compares final payable prices for a product across candidate pincodes,
@@ -309,6 +407,39 @@ class ProductPricingComparator:
         except Exception as fe:
             logger.debug(f"Live FOD query note in pricing: {fe}")
 
+        # 2b. Fetch dynamic product discount & prepaid quote directly from Meesho
+        chosen_var_id = chosen_var.get("variation_id") or chosen_var.get("id") if chosen_var else None
+        chosen_var_name = chosen_var.get("variation_name") or chosen_var.get("name") if chosen_var else None
+
+        live_quote = fetch_live_meesho_product_quote(
+            client=self.client,
+            product_id=product_id,
+            supplier_id=supplier_id,
+            base_price=base_price,
+            variation_id=chosen_var_id,
+            variation_name=chosen_var_name
+        )
+
+        live_account_discount = live_quote.get("account_discount") or 0.0
+        live_prepaid_discount = live_quote.get("prepaid_discount") or 0.0
+        discount_source = live_quote.get("discount_source", "none")
+
+        if live_account_discount > 0:
+            applied_account_discount = live_account_discount
+        elif fod_discount > 0:
+            max_fod_cap = round(base_price * 0.585, 2)
+            applied_account_discount = min(base_price, fod_discount, max_fod_cap)
+            discount_source = "advertised_tier_fallback"
+        else:
+            applied_account_discount = 0.0
+
+        if live_prepaid_discount > 0:
+            applied_prepaid_discount = live_prepaid_discount
+        elif applied_account_discount > 0:
+            applied_prepaid_discount = round(min(30.0, max(0.0, base_price * 0.13)), 2)
+        else:
+            applied_prepaid_discount = 0.0
+
         account_context = {
             "account_id": user_id or None,
             "user_id": acc_data.get("user_id"),
@@ -317,6 +448,10 @@ class ProductPricingComparator:
             "is_authenticated": bool(acc_data.get("xo")),
             "fod_tier": fod_tier,
             "fod_discount": fod_discount,
+            "meesho_live_discount": live_account_discount,
+            "applied_discount": applied_account_discount,
+            "discount_source": discount_source,
+            "meesho_prepaid_discount": applied_prepaid_discount,
             "offer_bucket": offer_bucket,
             "account_status": "Account Session Active",
             "account_verified": bool(acc_data.get("xo") or user_id or mobile)
@@ -331,8 +466,12 @@ class ProductPricingComparator:
                 pincode=pin,
                 supplier_id=supplier_id,
                 base_price=base_price,
+                variation_id=chosen_var_id,
+                variation_name=chosen_var_name,
                 fod_discount=fod_discount,
-                account_ident=acc_ident
+                account_ident=acc_ident,
+                live_discount=applied_account_discount if applied_account_discount > 0 else None,
+                live_prepaid=applied_prepaid_discount if applied_prepaid_discount > 0 else None
             )
 
         if len(candidate_pins) > 1:
@@ -372,7 +511,9 @@ class ProductPricingComparator:
         variation_name: Optional[str] = None,
         price_type: Optional[str] = None,
         fod_discount: float = 0.0,
-        account_ident: Optional[str] = None
+        account_ident: Optional[str] = None,
+        live_discount: Optional[float] = None,
+        live_prepaid: Optional[float] = None
     ) -> PriceBreakdown:
         """Evaluates pricing breakdown for one pincode via direct shipping charge quote."""
         pin_str = str(pincode).strip()
@@ -402,26 +543,37 @@ class ProductPricingComparator:
                 error_message=f"Shipping query failed: {e}"
             )
 
-        if not ship_info.get("serviceable", True):
+        # Check if shipping was unserviceable or if charges lookup failed/timed out
+        if not ship_info.get("serviceable", True) or ship_info.get("charges") is None or not ship_info.get("charges_verified", True):
+            if not ship_info.get("serviceable", True) and ship_info.get("charges") is not None:
+                st = ComparisonStatus.UNSUPPORTED_PINCODE
+                msg = f"Pincode {pin_str} is not serviceable."
+            else:
+                st = ComparisonStatus.FAILED
+                msg = ship_info.get("error") or f"Pincode {pin_str} shipping rate unverified (network or logistics timeout)."
+
             return PriceBreakdown(
                 product_id=product_id,
                 pincode=pin_str,
-                status=ComparisonStatus.UNSUPPORTED_PINCODE,
+                status=st,
                 city=city,
                 state=state,
                 zone=zone,
                 displayed_product_price=base_price,
                 delivery_charges=0.0,
                 final_payable_price=base_price,
-                error_message=f"Pincode {pin_str} is not serviceable."
+                error_message=msg,
+                account_verified=False,
+                raw_details=ship_info
             )
 
         delivery_charges = float(ship_info.get("charges") or 0.0)
         expected_date = ship_info.get("estimated_date") or ship_info.get("expected_delivery")
 
-        # Meesho First Order Discount (FOD) cap rule:
-        # Capped at advertised tier AND Meesho's max discount threshold (~58.5% of product price)
-        if fod_discount > 0:
+        # Account discount: prefer live Meesho quote, then FOD fallback
+        if live_discount is not None:
+            applied_account_discount = float(live_discount)
+        elif fod_discount > 0:
             max_fod_cap = round(base_price * 0.585, 2)
             applied_account_discount = min(base_price, fod_discount, max_fod_cap)
         else:
@@ -429,8 +581,14 @@ class ProductPricingComparator:
 
         final_payable = max(0.0, base_price + delivery_charges - applied_account_discount)
 
-        # Estimated prepaid/UPI discount offer (~10-15% of product price, typical ₹28-₹30 off)
-        prepaid_discount = round(min(30.0, max(0.0, base_price * 0.13)), 2) if applied_account_discount > 0 else 0.0
+        # Prepaid/UPI discount: prefer live Meesho quote, then standard estimate
+        if live_prepaid is not None:
+            prepaid_discount = float(live_prepaid)
+        elif applied_account_discount > 0:
+            prepaid_discount = round(min(30.0, max(0.0, base_price * 0.13)), 2)
+        else:
+            prepaid_discount = 0.0
+
         prepaid_payable = round(max(0.0, final_payable - prepaid_discount), 2) if prepaid_discount > 0 else None
 
         return PriceBreakdown(

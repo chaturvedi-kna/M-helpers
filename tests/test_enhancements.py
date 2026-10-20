@@ -765,6 +765,138 @@ class TestEnhancements(unittest.TestCase):
         assigned_account_ids = [res["account_id"] for res in cart_data["report"]["results"]]
         self.assertEqual(set(assigned_account_ids), {"8001", "8002"})
 
+    def test_check_shipping_charges_fast_no_fake_zero_on_timeout(self):
+        """Verifies that check_shipping_charges_fast NEVER returns fake 0 delivery charges on failure or timeout."""
+        from optimizer import check_shipping_charges_fast
+
+        mock_client = MagicMock()
+        mock_client.account_data = {"user_id": "492252136", "mobile": "8869049741"}
+        mock_client.api_call.side_effect = TimeoutError("Logistics connection timed out")
+
+        with patch("proxy_manager.request_with_retry") as mock_retry:
+            mock_retry.side_effect = Exception("Proxy network unreachable")
+
+            res = check_shipping_charges_fast(
+                client=mock_client,
+                dest_pin="110001",
+                product_id=624040872,
+                supplier_id=2635834
+            )
+
+            # Must NOT return fake 0 delivery charges!
+            self.assertFalse(res.get("charges_verified"))
+            self.assertIsNone(res.get("charges"))
+            self.assertFalse(res.get("serviceable"))
+            self.assertIn("error", res)
+
+    def test_pricing_comparator_excludes_failed_shipping_from_winners(self):
+        """Verifies that pincodes with timed-out or failed shipping are marked FAILED and not ranked as winners."""
+        from pricing_comparator import ProductPricingComparator, ComparisonStatus, fetch_live_meesho_product_quote
+
+        mock_client = MagicMock()
+        mock_client.account_data = {"user_id": "492252136", "mobile": "8869049741", "xo": "token"}
+
+        with patch("pricing_comparator.get_product_info") as mock_info, \
+             patch("pricing_comparator.fetch_live_meesho_product_quote") as mock_quote, \
+             patch("pricing_comparator.check_shipping_charges_fast") as mock_ship:
+
+            mock_info.return_value = {
+                "name": "Tata Dal 1kg",
+                "supplier_id": 2635834,
+                "price": 220.0,
+                "variations": [{"variation_id": 167, "variation_name": "Free Size", "in_stock": True}]
+            }
+
+            mock_quote.return_value = {
+                "account_discount": 128.0,
+                "prepaid_discount": 30.0,
+                "discount_source": "meesho_live_quote",
+                "raw_breakup": []
+            }
+
+            # Pin 110001 succeeds with 78 delivery
+            # Pin 500001 times out / fails
+            def _mock_shipping(client, dest_pin, product_id, supplier_id, quantity=1):
+                if str(dest_pin) == "110001":
+                    return {
+                        "pincode": "110001",
+                        "serviceable": True,
+                        "charges": 78.0,
+                        "charges_verified": True,
+                        "expected_delivery": "Delivery in 3 days",
+                        "account_specific": True
+                    }
+                else:
+                    return {
+                        "pincode": str(dest_pin),
+                        "serviceable": False,
+                        "charges": None,
+                        "charges_verified": False,
+                        "error": "Logistics timed out"
+                    }
+
+            mock_ship.side_effect = _mock_shipping
+
+            comparator = ProductPricingComparator(client=mock_client)
+            report = comparator.compare_product_pricing(
+                product_url_or_id="624040872",
+                pincodes=["500001", "110001"]
+            )
+
+            # Winner MUST be 110001 with verified 78.0 delivery, NOT 500001 with fake 0!
+            self.assertEqual(len(report.results), 2)
+            winner = report.cheapest_verified_option
+            self.assertIsNotNone(winner)
+            self.assertEqual(winner.pincode, "110001")
+            self.assertEqual(winner.delivery_charges, 78.0)
+            self.assertEqual(winner.account_discount, 128.0)
+            # Final price = 220 + 78 - 128 = 170.0
+            self.assertEqual(winner.final_payable_price, 170.0)
+            # Prepaid = 170 - 30 = 140.0
+            self.assertEqual(winner.prepaid_payable_price, 140.0)
+
+            # 500001 must be marked as FAILED and ranked after verified winner
+            failed_entry = next(r for r in report.results if r.pincode == "500001")
+            self.assertEqual(failed_entry.status, ComparisonStatus.FAILED)
+            self.assertIn("timed out", failed_entry.error_message.lower())
+
+    def test_fetch_live_meesho_product_quote_extraction(self):
+        """Verifies fetch_live_meesho_product_quote extracts exact Meesho server discounts and prepaid offers."""
+        from pricing_comparator import fetch_live_meesho_product_quote
+
+        mock_client = MagicMock()
+        mock_client.account_data = {"user_id": "492252136", "mobile": "8869049741", "xo": "valid_xo_token"}
+        mock_client.cart_session = "existing_cart_session_123"
+
+        # Mock Meesho's cart/add buy_now preview response
+        mock_client.api_call.return_value = {
+            "success": True,
+            "result": {
+                "effective_total": 172,
+                "effective_total_for_deferred_payment": 142,
+                "price_break_up": [
+                    {"type": "PRODUCT_PRICE", "value": 220},
+                    {"type": "DISCOUNT", "value": -128, "details": [{"type": "FIRST_ORDER_DISCOUNT", "value": -128}]},
+                    {"type": "ADDITIONAL_CHARGES", "value": 80}
+                ]
+            }
+        }
+
+        quote = fetch_live_meesho_product_quote(
+            client=mock_client,
+            product_id=624040872,
+            supplier_id=2635834,
+            base_price=220.0,
+            variation_id=167,
+            variation_name="Free Size"
+        )
+
+        self.assertEqual(quote["account_discount"], 128.0)
+        self.assertEqual(quote["prepaid_discount"], 30.0) # 172 - 142 = 30
+        self.assertEqual(quote["discount_source"], "meesho_live_quote")
+        # Ensure persistent cart session was preserved
+        self.assertEqual(mock_client.cart_session, "existing_cart_session_123")
+
 
 if __name__ == "__main__":
     unittest.main()
