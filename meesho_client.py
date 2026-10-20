@@ -105,7 +105,16 @@ class MeeshoClient:
             p_code = r.headers.get("x-proxy-auth-failure-code", "")
             raise PermissionError(f"HTTP 401 on {path} (Proxy Code: {p_code}): {r.text[:300]}")
 
-        r.raise_for_status()
+        if r.status_code >= 400:
+            err_desc = ""
+            try:
+                err_data = r.json()
+                err_desc = err_data.get("description") or err_data.get("message") or err_data.get("error") or r.text[:300]
+            except Exception:
+                err_desc = r.text[:300] if r.content else f"Status {r.status_code}"
+            self.log(f"[MeeshoClient] HTTP {r.status_code} on {path}: {err_desc}")
+            raise requests.exceptions.HTTPError(f"HTTP {r.status_code} ({err_desc}) on {path}", response=r)
+
         return r.json() if r.content else {}
 
     def refresh_session(self) -> Dict[str, Any]:

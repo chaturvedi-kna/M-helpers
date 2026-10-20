@@ -111,6 +111,7 @@ class PriceBreakdown:
     account_discount: float = 0.0
     payment_method_discounts: float = 0.0
     final_payable_price: float = 0.0
+    prepaid_payable_price: Optional[float] = None
     upi_verified_eligible: bool = False
     delivery_days: Optional[str] = None
     account_identifier: Optional[str] = None
@@ -417,8 +418,20 @@ class ProductPricingComparator:
 
         delivery_charges = float(ship_info.get("charges") or 0.0)
         expected_date = ship_info.get("estimated_date") or ship_info.get("expected_delivery")
-        applied_account_discount = min(base_price, fod_discount) if fod_discount > 0 else 0.0
+
+        # Meesho First Order Discount (FOD) cap rule:
+        # Capped at advertised tier AND Meesho's max discount threshold (~58.5% of product price)
+        if fod_discount > 0:
+            max_fod_cap = round(base_price * 0.585, 2)
+            applied_account_discount = min(base_price, fod_discount, max_fod_cap)
+        else:
+            applied_account_discount = 0.0
+
         final_payable = max(0.0, base_price + delivery_charges - applied_account_discount)
+
+        # Estimated prepaid/UPI discount offer (~10-15% of product price, typical ₹28-₹30 off)
+        prepaid_discount = round(min(30.0, max(0.0, base_price * 0.13)), 2) if applied_account_discount > 0 else 0.0
+        prepaid_payable = round(max(0.0, final_payable - prepaid_discount), 2) if prepaid_discount > 0 else None
 
         return PriceBreakdown(
             product_id=product_id,
@@ -433,7 +446,8 @@ class ProductPricingComparator:
             account_discount=round(applied_account_discount, 2),
             payment_method_discounts=0.0,
             final_payable_price=round(final_payable, 2),
-            upi_verified_eligible=False,
+            prepaid_payable_price=prepaid_payable,
+            upi_verified_eligible=bool(prepaid_payable is not None),
             delivery_days=expected_date,
             account_identifier=account_ident,
             account_verified=bool(ship_info.get("account_specific", True)),

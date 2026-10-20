@@ -360,6 +360,9 @@ HTML_TEMPLATE = """
               <tbody id="pricing-table-body" class="divide-y divide-slate-800 font-mono text-xs"></tbody>
             </table>
           </div>
+          <div class="mt-3 p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-400">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-circle-info text-amber-400"></i><span><strong>Pricing Breakdown:</strong> Delivery fee is verified live per pincode. First Order Discount reflects Meesho's item cap (~58% on product price). The green <strong>Prepaid</strong> price includes instant online/UPI payment offer savings.</span></span>
+          </div>
         </div>
       </section>
 
@@ -1140,7 +1143,10 @@ HTML_TEMPLATE = """
             <td class="py-2.5 px-3">₹${r.displayed_product_price.toFixed(2)}</td>
             <td class="py-2.5 px-3 font-mono">₹${r.delivery_charges.toFixed(2)}</td>
             <td class="py-2.5 px-3 font-semibold ${accDiscount > 0 ? 'text-emerald-400' : 'text-slate-500'}">${accDiscount > 0 ? '-₹' + accDiscount.toFixed(2) : '₹0.00'}</td>
-            <td class="py-2.5 px-3 font-bold text-rose-400">₹${r.final_payable_price.toFixed(2)}</td>
+            <td class="py-2.5 px-3">
+              <div class="font-bold text-rose-400">₹${r.final_payable_price.toFixed(2)}</div>
+              ${r.prepaid_payable_price ? `<div class="text-[11px] text-emerald-400 font-mono font-medium" title="Price with online/UPI prepaid offer">Prepaid: ₹${r.prepaid_payable_price.toFixed(2)}</div>` : ''}
+            </td>
             <td class="py-2.5 px-3">
               <span class="px-2 py-0.5 rounded text-[10px] ${r.status === 'VERIFIED_AVAILABLE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}">
                 <i class="fa-solid ${r.account_verified ? 'fa-check-double text-emerald-400' : 'fa-circle-xmark'} mr-1"></i>${r.account_verified ? 'Account Verified' : r.status}

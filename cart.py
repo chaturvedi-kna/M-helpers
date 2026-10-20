@@ -175,12 +175,12 @@ def add_product_to_cart(
 
     payload = {
         "context": "pdp",
-        "identifier": "cart",
+        "identifier": "buy_now",
         "cart_session": client.cart_session,
         "replaceable": False,
         "items": [
             {
-                "identifier": "cart",
+                "identifier": "buy_now",
                 "product_id": int(product_id),
                 "supplier_id": int(supplier_id),
                 "variation_id": int(variation_id),
@@ -274,7 +274,7 @@ def view_cart(client: MeeshoClient) -> Dict[str, Any]:
 
     payload = {
         "context": "review",
-        "identifier": "cart",
+        "identifier": "buy_now",
         "cart_session": client.cart_session or "",
         "dest_pin": None,
         "address_id": None,
