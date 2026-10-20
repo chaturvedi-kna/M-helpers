@@ -1287,17 +1287,40 @@ HTML_TEMPLATE = """
               <strong>Tiers Found:</strong> ${Object.entries(rep.tier_counts || {}).map(([k, v]) => `<span class="bg-amber-950/70 border border-amber-800 text-amber-300 px-2 py-0.5 rounded mr-1">${k}: ${v}</span>`).join(' ')}
             </div>
 
-            <!-- Interactive FOD Tier Cards Grid -->
+            <!-- Interactive FOD Tier Cards Grid with Multi-Tier Selection -->
             <div class="mt-4 mb-4">
-              <div class="flex items-center justify-between mb-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
                 <div>
                   <h5 class="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                     <i class="fa-solid fa-layer-group"></i>
-                    <span>Categorized Discount Tiers (Per-Tier Download & 1-Click Cart Seeding)</span>
+                    <span>Categorized Discount Tiers (Multi-Tier Select, Download & 1-Click Cart Seeding)</span>
                   </h5>
-                  <p class="text-[11px] text-slate-400 mt-0.5">Select a tier below (e.g. ₹170 OFF) to forward directly to Cart Seeding without re-uploading, or download individual tier JSONs.</p>
+                  <p class="text-[11px] text-slate-400 mt-0.5">Check any tier(s) below (e.g. select both ₹170 and ₹190 OFF) to forward together to Cart Seeding without re-uploading.</p>
                 </div>
               </div>
+
+              <!-- Multi-Tier Bulk Action Bar -->
+              <div class="mb-3.5 p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-inner">
+                <div class="flex items-center gap-3">
+                  <label class="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-200 select-none">
+                    <input type="checkbox" id="fod-select-all-tiers" onchange="toggleSelectAllFodTiers(this.checked)" class="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-950 border-slate-700 cursor-pointer">
+                    <span>Select All Tiers</span>
+                  </label>
+                  <span class="text-slate-600">&bull;</span>
+                  <span class="text-xs text-slate-300">
+                    Selected: <strong id="fod-selected-tiers-count" class="text-amber-400">0</strong> tiers (<strong id="fod-selected-accs-count" class="text-white">0</strong> accounts)
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button id="btn-download-selected-tiers" onclick="downloadSelectedTiersJson()" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition" disabled>
+                    <i class="fa-solid fa-download text-amber-400"></i> Download Selected (<span id="btn-dl-count">0</span>)
+                  </button>
+                  <button id="btn-forward-selected-tiers" onclick="forwardSelectedTiersToCartSeeding()" class="bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow" disabled>
+                    <i class="fa-solid fa-cart-plus"></i> Forward Selected to Cart Seeder (<span id="btn-fwd-count">0</span>) &rarr;
+                  </button>
+                </div>
+              </div>
+
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 ${Object.entries(data.accounts_by_tier || {}).map(([tierKey, accs]) => {
                   let title = tierKey.replace('tier_', '₹') + ' OFF';
@@ -1309,24 +1332,27 @@ HTML_TEMPLATE = """
                   const badgeClass = isHighTier ? 'bg-amber-950 text-amber-300 border-amber-700' : 'bg-slate-800 text-slate-300 border-slate-700';
 
                   return `
-                    <div class="p-3.5 rounded-xl border ${borderClass} flex flex-col justify-between shadow-md">
+                    <div class="p-3.5 rounded-xl border ${borderClass} flex flex-col justify-between shadow-md hover:border-slate-600 transition">
                       <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeClass}">
-                            ${title}
-                          </span>
+                        <div class="flex items-center justify-between mb-2">
+                          <label class="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" class="fod-tier-checkbox w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-900 border-slate-700 cursor-pointer" data-tier="${tierKey}" data-count="${count}" data-title="${title}" onchange="updateFodSelectedTiersState()">
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeClass}">
+                              ${title}
+                            </span>
+                          </label>
                           <span class="font-mono text-xs font-bold text-white bg-slate-800 px-2 py-0.5 rounded">${count} Account${count === 1 ? '' : 's'}</span>
                         </div>
-                        <p class="text-[11px] text-slate-400 mb-3">
+                        <p class="text-[11px] text-slate-400 mb-3 pl-6">
                           ${tierKey === 'no_offer' ? 'Accounts without active first-order discount.' : `Verified live ${title} promotional discount.`}
                         </p>
                       </div>
                       <div class="flex items-center gap-2 pt-2 border-t border-slate-800/80">
-                        <button onclick="downloadTierAccountsJson('${tierKey}')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 border border-slate-700 transition" title="Download ${tierKey}_${count}.json">
-                          <i class="fa-solid fa-download text-amber-400"></i> Download JSON
+                        <button onclick="downloadTierAccountsJson('${tierKey}')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 border border-slate-700 transition" title="Download ${tierKey}_${count}.json">
+                          <i class="fa-solid fa-download text-amber-400"></i> JSON
                         </button>
-                        <button onclick="forwardTierToCartSeeding('${tierKey}')" class="flex-1 bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow" title="Forward ${count} accounts to Cart Seeding">
-                          <i class="fa-solid fa-cart-plus"></i> Forward to Cart &rarr;
+                        <button onclick="forwardTierToCartSeeding('${tierKey}')" class="flex-1 bg-purple-900/60 hover:bg-purple-800/80 text-purple-200 border border-purple-700/80 px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition" title="Forward ONLY ${title} (${count} accounts) to Cart Seeding">
+                          <i class="fa-solid fa-arrow-right text-purple-400"></i> Only This Tier
                         </button>
                       </div>
                     </div>
@@ -1369,6 +1395,142 @@ HTML_TEMPLATE = """
         btn.disabled = false;
         resultsDiv.innerHTML = `<div class="text-rose-400 text-sm">Error: ${err.message || err}</div>`;
       }
+    }
+
+    function getSelectedFodTiers() {
+      const checkboxes = document.querySelectorAll('.fod-tier-checkbox:checked');
+      const selected = [];
+      checkboxes.forEach(cb => {
+        selected.push({
+          key: cb.dataset.tier,
+          count: parseInt(cb.dataset.count, 10) || 0,
+          title: cb.dataset.title || cb.dataset.tier
+        });
+      });
+      return selected;
+    }
+
+    function updateFodSelectedTiersState() {
+      const selected = getSelectedFodTiers();
+      const totalAccs = selected.reduce((sum, item) => sum + item.count, 0);
+
+      const tierCountEl = document.getElementById('fod-selected-tiers-count');
+      const accCountEl = document.getElementById('fod-selected-accs-count');
+      const btnDl = document.getElementById('btn-download-selected-tiers');
+      const btnFwd = document.getElementById('btn-forward-selected-tiers');
+      const btnDlCount = document.getElementById('btn-dl-count');
+      const btnFwdCount = document.getElementById('btn-fwd-count');
+
+      if (tierCountEl) tierCountEl.textContent = selected.length;
+      if (accCountEl) accCountEl.textContent = totalAccs;
+      if (btnDlCount) btnDlCount.textContent = totalAccs;
+      if (btnFwdCount) btnFwdCount.textContent = totalAccs;
+
+      const hasSelection = selected.length > 0;
+      if (btnDl) btnDl.disabled = !hasSelection;
+      if (btnFwd) btnFwd.disabled = !hasSelection;
+
+      const allCbs = document.querySelectorAll('.fod-tier-checkbox');
+      const selectAllCb = document.getElementById('fod-select-all-tiers');
+      if (selectAllCb && allCbs.length > 0) {
+        selectAllCb.checked = (selected.length === allCbs.length);
+      }
+    }
+
+    function toggleSelectAllFodTiers(checked) {
+      const allCbs = document.querySelectorAll('.fod-tier-checkbox');
+      allCbs.forEach(cb => { cb.checked = checked; });
+      updateFodSelectedTiersState();
+    }
+
+    function forwardSelectedTiersToCartSeeding() {
+      const selected = getSelectedFodTiers();
+      if (selected.length === 0) {
+        alert("Please select at least one discount tier to forward.");
+        return;
+      }
+
+      const byTier = window.lastFodSummary && window.lastFodSummary.accounts_by_tier;
+      if (!byTier) {
+        alert("No FOD classification data available.");
+        return;
+      }
+
+      let combinedAccs = [];
+      let tierTitles = [];
+      selected.forEach(item => {
+        const accs = byTier[item.key] || [];
+        combinedAccs = combinedAccs.concat(accs);
+        tierTitles.push(item.title);
+      });
+
+      if (combinedAccs.length === 0) {
+        alert("No accounts found in selected tiers.");
+        return;
+      }
+
+      window.parsedAccounts['assign'] = combinedAccs;
+      switchTab('tab-assignment');
+
+      const dryCheck = document.getElementById('assign-dryrun');
+      if (dryCheck) dryCheck.checked = false;
+
+      const pasteRadio = document.querySelector('input[name="assign-input-mode"][value="paste"]');
+      if (pasteRadio) {
+        pasteRadio.checked = true;
+        toggleAccountInputMode('assign');
+      }
+      const ta = document.getElementById('assign-paste-textarea');
+      if (ta) {
+        ta.value = JSON.stringify(combinedAccs, null, 2);
+      }
+
+      const cartRadio = document.querySelector('input[name="seeding-mode"][value="cart_only"]');
+      if (cartRadio) {
+        cartRadio.checked = true;
+        toggleSeedingMode();
+      }
+
+      const statusBox = document.getElementById('assign-account-status');
+      if (statusBox) {
+        statusBox.className = 'mt-3 p-3 bg-purple-950/80 border border-purple-700 text-purple-200 text-xs rounded-lg flex items-center justify-between';
+        statusBox.innerHTML = `
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-circle-check text-emerald-400 text-base"></i>
+            <span><strong>${combinedAccs.length} Fresh Accounts</strong> loaded from <strong>${tierTitles.join(' + ')}</strong> (${selected.length} Selected Tiers) for Cart Seeding.</span>
+          </div>
+          <span class="text-[11px] font-mono text-purple-300">Mode: Cart Only</span>
+        `;
+        statusBox.classList.remove('hidden');
+      }
+
+      const prodInput = document.getElementById('assign-products-input');
+      if (prodInput) {
+        prodInput.focus();
+      }
+    }
+
+    function downloadSelectedTiersJson() {
+      const selected = getSelectedFodTiers();
+      if (selected.length === 0) {
+        alert("Please select at least one discount tier to download.");
+        return;
+      }
+
+      const byTier = window.lastFodSummary && window.lastFodSummary.accounts_by_tier;
+      if (!byTier) {
+        alert("No FOD classification data available.");
+        return;
+      }
+
+      let combinedAccs = [];
+      selected.forEach(item => {
+        const accs = byTier[item.key] || [];
+        combinedAccs = combinedAccs.concat(accs);
+      });
+
+      const tierTag = selected.map(s => s.key.replace('tier_', '')).join('_');
+      downloadJsonData(combinedAccs, `tiers_${tierTag}_${combinedAccs.length}.json`);
     }
 
     function downloadTierAccountsJson(tierKey) {

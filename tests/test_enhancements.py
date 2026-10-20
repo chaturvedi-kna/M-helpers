@@ -897,6 +897,90 @@ class TestEnhancements(unittest.TestCase):
         # Ensure persistent cart session was preserved
         self.assertEqual(mock_client.cart_session, "existing_cart_session_123")
 
+    def test_meesho_client_auto_refreshes_on_proxy_code_1007(self):
+        """Verifies that HTTP 401 with proxy code 1007 triggers auto-refresh instead of premature crash."""
+        from meesho_client import MeeshoClient
+        acc = {
+            "user_id": "492252136",
+            "mobile": "8869049741",
+            "xo": "old_expired_xo",
+            "ox": "valid_refresh_ox"
+        }
+
+        with patch("meesho_client.is_token_expired", return_value=False, create=True), \
+             patch("account_manager.is_token_expired", return_value=False):
+            client = MeeshoClient(account_data=acc, auto_refresh=True)
+
+        # Mock first response as HTTP 401 with proxy code 1007
+        resp_401 = MagicMock()
+        resp_401.status_code = 401
+        resp_401.headers = {"x-proxy-auth-failure-code": "1007"}
+        resp_401.text = "Session revoked/expired"
+
+        # Mock second response after refresh as HTTP 200
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.content = b'{"success": true, "result": {"cart_session": "new_sess"}}'
+        resp_200.json.return_value = {"success": True, "result": {"cart_session": "new_sess"}}
+
+        with patch("proxy_manager.request_with_retry", side_effect=[resp_401, resp_200]) as mock_req, \
+             patch.object(client, "refresh_session") as mock_refresh:
+            # When refresh_session is called, update xo in acc
+            def _fake_refresh():
+                client.account_data["xo"] = "freshly_refreshed_xo"
+                return client.account_data
+            mock_refresh.side_effect = _fake_refresh
+
+            res = client.api_call("POST", "/api/1.0/cart/add", payload={"product_id": 794334})
+
+            # Must have called refresh_session and succeeded!
+            mock_refresh.assert_called_once()
+            self.assertTrue(res.get("success"))
+            self.assertEqual(res.get("result", {}).get("cart_session"), "new_sess")
+
+    def test_multi_tier_cart_seeding_workflow(self):
+        """Verifies selecting and forwarding accounts from multiple tiers (e.g. 170 and 190) into Cart Seeder."""
+        from web_ui import app
+        test_client = app.test_client()
+
+        acc1 = {"user_id": "9001", "mobile": "9000000001", "xo": "token1", "ox": "ox1"}
+        acc2 = {"user_id": "9002", "mobile": "9000000002", "xo": "token2", "ox": "ox2"}
+        acc3 = {"user_id": "9003", "mobile": "9000000003", "xo": "token3", "ox": "ox3"}
+        acc4 = {"user_id": "9004", "mobile": "9000000004", "xo": "token4", "ox": "ox4"}
+
+        # Suppose FOD classification produced 3 tiers:
+        accounts_by_tier = {
+            "tier_170": [acc1, acc2],
+            "tier_190": [acc3],
+            "tier_50": [acc4]
+        }
+
+        # User selects 2 tiers: tier_170 + tier_190
+        selected_tiers = ["tier_170", "tier_190"]
+        combined_selected_accounts = []
+        for t in selected_tiers:
+            combined_selected_accounts.extend(accounts_by_tier[t])
+
+        self.assertEqual(len(combined_selected_accounts), 3)
+
+        # Forward selected tiers directly to run-assignment
+        cart_resp = test_client.post("/api/run-assignment", json={
+            "accounts_source": combined_selected_accounts,
+            "mode": "cart_only",
+            "cart_set_name": "Cart Set Multi-Tier",
+            "products_source": ["794334"],
+            "seed": 42,
+            "count": 1,
+            "dry_run": True
+        })
+
+        self.assertEqual(cart_resp.status_code, 200)
+        cart_data = cart_resp.get_json()
+        self.assertTrue(cart_data["success"])
+        self.assertEqual(cart_data["report"]["total_accounts"], 3)
+        assigned_account_ids = [res["account_id"] for res in cart_data["report"]["results"]]
+        self.assertEqual(set(assigned_account_ids), {"9001", "9002", "9003"})
+
 
 if __name__ == "__main__":
     unittest.main()

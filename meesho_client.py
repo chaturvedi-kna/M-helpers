@@ -38,6 +38,17 @@ class MeeshoClient:
         self.session = requests.Session()
         self.update_headers()
 
+        # Proactively refresh token if expired or about to expire
+        if self.auto_refresh and isinstance(self.account_data, dict) and self.account_data.get("ox"):
+            try:
+                from account_manager import is_token_expired
+                if is_token_expired(self.account_data, buffer_seconds=60):
+                    user_label = self.account_data.get("user_id") or self.account_data.get("mobile") or "unknown"
+                    self.log(f"[MeeshoClient] Proactively refreshing expired token for user {user_label} via /api/2.0/xo...")
+                    self.refresh_session()
+            except Exception as pe:
+                self.log(f"[MeeshoClient] Proactive refresh note: {pe}")
+
 
     def log(self, msg: str):
         if self.log_callback:
@@ -88,18 +99,14 @@ class MeeshoClient:
         # Check for token expiration / auth failure
         if r.status_code == 401 and allow_refresh_retry and self.auto_refresh:
             proxy_failure_code = r.headers.get("x-proxy-auth-failure-code", "")
-            if proxy_failure_code == "1007":
-                self.log(f"[MeeshoClient] HTTP 401 (Code 1007: Session Permanently Revoked). Re-login required.")
-                raise PermissionError("HTTP 401: Account session revoked (Proxy Code 1007). Fresh login required.")
-
-            self.log(f"[MeeshoClient] HTTP 401 received (Proxy failure code: {proxy_failure_code or '1014'}). Triggering auto-refresh...")
+            self.log(f"[MeeshoClient] HTTP 401 received on {path} (Proxy failure code: {proxy_failure_code or '1014'}). Triggering auto-refresh via /api/2.0/xo...")
             try:
                 self.refresh_session()
                 self.log("[MeeshoClient] XO token refreshed successfully. Retrying request...")
                 return self.api_call(method, path, payload, params, allow_refresh_retry=False, timeout=timeout)
             except Exception as e:
                 self.log(f"[MeeshoClient] Auto-refresh failed: {e}")
-                raise PermissionError(f"HTTP 401: Token expired and auto-refresh failed ({e})")
+                raise PermissionError(f"HTTP 401: Account session expired and auto-refresh failed ({e}). Fresh login required.")
 
         if r.status_code == 401:
             p_code = r.headers.get("x-proxy-auth-failure-code", "")
@@ -126,14 +133,18 @@ class MeeshoClient:
             # 1. Prefer Direct API refresh (/api/2.0/xo)
             try:
                 from account_manager import DirectApiTokenRefreshProvider
-                direct_provider = DirectApiTokenRefreshProvider()
+                direct_provider = DirectApiTokenRefreshProvider(api_host=self.api_host)
                 refreshed = direct_provider.refresh(self.account_data)
                 self.log("[MeeshoClient] Session refreshed via direct Meesho API (/api/2.0/xo).")
             except Exception as e:
                 self.log(f"[MeeshoClient] Direct API refresh encountered ({e}), attempting Telegram bot fallback...")
+                from auth import refresh_account_via_telegram
                 refreshed = refresh_account_via_telegram(self.account_data, self.account_path)
 
-        self.account_data = refreshed
+        if isinstance(self.account_data, dict) and isinstance(refreshed, dict):
+            self.account_data.update(refreshed)
+        else:
+            self.account_data = refreshed
         self.update_headers()
 
         if self.account_path:
