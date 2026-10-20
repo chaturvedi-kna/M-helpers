@@ -25,7 +25,7 @@ class TestPricingComparator(unittest.TestCase):
         """Verifies exact calculation: final_payable = displayed + delivery - discounts - payment_discounts."""
         breakdown = PriceBreakdown(
             product_id=624039638,
-            pincode="500092",
+            pincode="500081",
             status=ComparisonStatus.VERIFIED_AVAILABLE,
             city="Hyderabad",
             state="Telangana",
@@ -43,7 +43,7 @@ class TestPricingComparator(unittest.TestCase):
     def test_ranking_and_cheapest_selection(self):
         """Verifies ranking by final payable price and identification of lowest option."""
         opt_hyd = PriceBreakdown(
-            product_id=101, pincode="500092", status=ComparisonStatus.VERIFIED_AVAILABLE,
+            product_id=101, pincode="500081", status=ComparisonStatus.VERIFIED_AVAILABLE,
             city="Hyderabad", displayed_product_price=200.0, delivery_charges=50.0,
             eligible_discounts=10.0, payment_method_discounts=10.0, final_payable_price=230.0
         )
@@ -68,7 +68,7 @@ class TestPricingComparator(unittest.TestCase):
         report = PricingComparisonReport(
             product_id=101,
             product_name="Sample Dal",
-            tested_pincodes=["500092", "110025", "999999"],
+            tested_pincodes=["500081", "110025", "999999"],
             results=ranked,
             cheapest_verified_option=verified[0],
             max_savings_vs_worst=verified[-1].final_payable_price - verified[0].final_payable_price
@@ -81,21 +81,21 @@ class TestPricingComparator(unittest.TestCase):
 
     def test_cache_hit_and_miss(self):
         breakdown = PriceBreakdown(
-            product_id=101, pincode="500092", status=ComparisonStatus.VERIFIED_AVAILABLE,
+            product_id=101, pincode="500081", status=ComparisonStatus.VERIFIED_AVAILABLE,
             displayed_product_price=100.0, final_payable_price=100.0
         )
         # Cache miss initially
-        self.assertIsNone(self.cache.get(101, "500092"))
+        self.assertIsNone(self.cache.get(101, "500081"))
 
         # Set cache
-        self.cache.set(101, "500092", breakdown)
-        cached = self.cache.get(101, "500092")
+        self.cache.set(101, "500081", breakdown)
+        cached = self.cache.get(101, "500081")
         self.assertIsNotNone(cached)
         self.assertEqual(cached.product_id, 101)
 
         # Clear cache
         self.cache.clear()
-        self.assertIsNone(self.cache.get(101, "500092"))
+        self.assertIsNone(self.cache.get(101, "500081"))
 
     @patch("pricing_comparator.get_product_info")
     @patch("pricing_comparator.check_shipping_charges_fast")

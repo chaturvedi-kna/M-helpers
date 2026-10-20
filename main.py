@@ -371,7 +371,7 @@ def main():
             candidate_pins = (
                 [p.strip() for p in args.pincodes.split(",")]
                 if args.pincodes
-                else data_pool.get("candidate_pincodes", ["500092", "110025", "560001", "400001"])
+                else data_pool.get("candidate_pincodes", ["500081", "110025", "560001", "400001"])
             )
             print(f"[*] Product Reference : {target_prod}")
             print(f"[*] Testing Pincodes  : {', '.join(candidate_pins)}")

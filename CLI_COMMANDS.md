@@ -46,12 +46,12 @@ python main.py --action pricing --account 8869049741.json --product 624039638 --
 
 ### Option B: Search Specific Delivery Pincodes
 ```powershell
-python main.py --action pricing --account 8869049741.json --product 624039638 --pincodes "500092,110025,560001,400001" --proxy proxybin-in
+python main.py --action pricing --account 8869049741.json --product 624039638 --pincodes "500081,110025,560001,400001" --proxy proxybin-in
 ```
 
 ### Run with Global Rotating Proxy (Any Country)
 ```powershell
-python main.py --action pricing --account 8869049741.json --product 624039638 --pincodes "500092,110025" --proxy proxybin-any
+python main.py --action pricing --account 8869049741.json --product 624039638 --pincodes "500081,110025" --proxy proxybin-any
 ```
 
 ### Run with Direct Local IP Backup Enabled

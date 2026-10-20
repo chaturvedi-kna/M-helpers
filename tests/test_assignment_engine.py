@@ -6,6 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch, MagicMock
 
 from assignment_engine import (
     validate_product_reference,
@@ -28,12 +29,12 @@ class TestAssignmentEngine(unittest.TestCase):
         ]
         self.sample_addresses = [
             {
-                "name": "K V Sharma",
-                "mobile": "9182777959",
-                "address_line_1": "Flat 204, Green Heights",
+                "name": "Aarav Patel",
+                "mobile": "9876543210",
+                "address_line_1": "Plot No. 12, Cyber Gateway, HITEC City",
                 "city": "Hyderabad",
                 "state": "Telangana",
-                "pin": "500092"
+                "pin": "500081"
             },
             {
                 "name": "Rohit Verma",
@@ -139,6 +140,53 @@ class TestAssignmentEngine(unittest.TestCase):
                 loaded = json.load(f)
             self.assertEqual(loaded["seed"], 42)
             self.assertEqual(loaded["accounts_count"], 2)
+
+    @patch("assignment_engine.add_product_to_cart")
+    @patch("assignment_engine.get_product_info")
+    def test_live_cart_failure_reporting(self, mock_info, mock_add_cart):
+        """Ensures that cart addition failures during live execution are NOT swallowed as success."""
+        mock_info.return_value = {
+            "supplier_id": 101,
+            "variations": [{"variation_id": 1, "variation_name": "Free Size", "in_stock": True}]
+        }
+        mock_add_cart.return_value = {"success": False, "error": "Item out of stock"}
+
+        cfg = AssignmentRuleConfig(mode="cart_only", products_per_account=1, random_seed=42)
+        planner = AssignmentPlanner(cfg)
+        plan = planner.create_plan(self.sample_products[:1], [], ["acc_test"])
+
+        mock_client = MagicMock()
+        executor = AssignmentExecutor(plan)
+        report = executor.execute_plan(account_client_map={"acc_test": mock_client}, dry_run=False)
+
+        self.assertEqual(report["mode"], "LIVE_EXECUTION")
+        res = report["results"][0]
+        self.assertEqual(res["status"], "FAILED")
+        self.assertIn("Item out of stock", res["error"])
+        self.assertFalse(res["added_products"][0]["cart_success"])
+
+    @patch("assignment_engine.add_product_to_cart")
+    @patch("assignment_engine.get_product_info")
+    def test_live_cart_success_reporting(self, mock_info, mock_add_cart):
+        """Ensures that successful cart additions report status SUCCESS."""
+        mock_info.return_value = {
+            "supplier_id": 101,
+            "variations": [{"variation_id": 1, "variation_name": "Free Size", "in_stock": True}]
+        }
+        mock_add_cart.return_value = {"success": True, "cart_session": "sess_123", "result": {"total_quantity": 1}}
+
+        cfg = AssignmentRuleConfig(mode="cart_only", products_per_account=1, random_seed=42)
+        planner = AssignmentPlanner(cfg)
+        plan = planner.create_plan(self.sample_products[:1], [], ["acc_test"])
+
+        mock_client = MagicMock()
+        executor = AssignmentExecutor(plan)
+        report = executor.execute_plan(account_client_map={"acc_test": mock_client}, dry_run=False)
+
+        res = report["results"][0]
+        self.assertEqual(res["status"], "SUCCESS")
+        self.assertIsNone(res.get("error"))
+        self.assertTrue(res["added_products"][0]["cart_success"])
 
 
 if __name__ == "__main__":

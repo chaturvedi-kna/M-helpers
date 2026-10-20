@@ -322,7 +322,7 @@ class TestEnhancements(unittest.TestCase):
             )
             pricing_resp = test_client.post("/api/compare-pricing", json={
                 "product": "624039638",
-                "pincodes": "500092, 110025",
+                "pincodes": "500081, 110025",
                 "account_data": {
                     "mobile": "8869049741",
                     "user_id": 602413725,
@@ -337,7 +337,7 @@ class TestEnhancements(unittest.TestCase):
         # 5. Pricing comparison must fail with 400 when account credentials are not provided
         no_acc_resp = test_client.post("/api/compare-pricing", json={
             "product": "624039638",
-            "pincodes": "500092, 110025"
+            "pincodes": "500081, 110025"
         })
         self.assertEqual(no_acc_resp.status_code, 400)
         self.assertFalse(no_acc_resp.get_json()["success"])
@@ -527,11 +527,11 @@ class TestEnhancements(unittest.TestCase):
         user_products = ["624039638", "513926576"]
         user_address = [{
             "name": "Custom User",
-            "mobile": "9182777959",
+            "mobile": "9876543210",
             "address_line_1": "Flat 101, Test Road",
             "city": "Hyderabad",
             "state": "Telangana",
-            "pin": "500092"
+            "pin": "500081"
         }]
 
         # 1. Cart Only Mode: No address needed or assigned
@@ -569,7 +569,7 @@ class TestEnhancements(unittest.TestCase):
         self.assertEqual(plan_addr["address_set_name"], "My Custom Address Set")
         for res in plan_addr["results"]:
             self.assertEqual(res["assigned_products_count"], 0)
-            self.assertEqual(res["assigned_address_pincode"], "500092")
+            self.assertEqual(res["assigned_address_pincode"], "500081")
 
         # 3. No Defaults Enforcement: empty products in cart_only mode raises error
         with self.assertRaises(ValueError):
@@ -613,7 +613,7 @@ class TestEnhancements(unittest.TestCase):
                 "variations": [{"variation_id": 1, "variation_name": "Free Size", "in_stock": True}]
             }
             mock_ship.return_value = {
-                "pincode": "500092",
+                "pincode": "500081",
                 "serviceable": True,
                 "charges": 0.0,
                 "expected_delivery": "2 days",
@@ -625,7 +625,7 @@ class TestEnhancements(unittest.TestCase):
                 offer_bucket="HIGH"
             )
 
-            report = comparator.compare_product_pricing(product_url_or_id="624039638", pincodes=["500092"])
+            report = comparator.compare_product_pricing(product_url_or_id="624039638", pincodes=["500081"])
             self.assertIsNotNone(report.account_context)
             self.assertEqual(report.account_context["mobile"], "8869049741")
             self.assertEqual(report.account_context["user_id"], 492252136)
@@ -686,11 +686,11 @@ class TestEnhancements(unittest.TestCase):
             "address_set_name": "Address Set 1",
             "addresses_source": [{
                 "name": "Custom",
-                "mobile": "9182777959",
+                "mobile": "9876543210",
                 "address_line_1": "Flat 1",
                 "city": "Hyderabad",
                 "state": "Telangana",
-                "pin": "500092"
+                "pin": "500081"
             }],
             "seed": 42,
             "dry_run": True

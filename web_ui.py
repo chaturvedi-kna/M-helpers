@@ -296,7 +296,7 @@ HTML_TEMPLATE = """
           <!-- Custom Pincodes Input -->
           <div id="pricing-custom-pincodes-container" class="mt-4">
             <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Candidate Delivery Pincodes (Comma-separated)</label>
-            <input type="text" id="pricing-pincodes" value="500092, 110025, 560001, 400001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono">
+            <input type="text" id="pricing-pincodes" value="500081, 110025, 560001, 400001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono">
           </div>
 
           <div id="pricing-all-india-info" class="mt-4 p-3 bg-slate-950/70 border border-slate-800 rounded-lg hidden text-xs text-slate-300">
@@ -663,8 +663,8 @@ HTML_TEMPLATE = """
 
               <div id="addr-box-form" class="space-y-2">
                 <div class="grid grid-cols-2 gap-2">
-                  <input type="text" id="addr-name" placeholder="Full Name (e.g. K V Sharma)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
-                  <input type="text" id="addr-mobile" placeholder="Mobile (e.g. 9182777959)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input type="text" id="addr-name" placeholder="Full Name (e.g. Aarav Patel)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
+                  <input type="text" id="addr-mobile" placeholder="Mobile (e.g. 9876543210)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 </div>
                 <input type="text" id="addr-line1" placeholder="Address Line 1 (Flat, House No, Building)" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white">
                 <div class="grid grid-cols-3 gap-2">
@@ -675,7 +675,7 @@ HTML_TEMPLATE = """
               </div>
 
               <div id="addr-box-json" class="hidden">
-                <textarea id="assign-address-json" rows="3" placeholder='[{"name": "...", "mobile": "...", "address_line_1": "...", "city": "...", "state": "...", "pin": "500092"}]' class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
+                <textarea id="assign-address-json" rows="3" placeholder='[{"name": "Aarav Patel", "mobile": "9876543210", "address_line_1": "Plot No. 12, Cyber Gateway, HITEC City", "city": "Hyderabad", "state": "Telangana", "pin": "500081"}]' class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none"></textarea>
               </div>
 
               <div class="flex items-center justify-between pt-1">
@@ -697,8 +697,8 @@ HTML_TEMPLATE = """
                 <input type="number" id="assign-seed" value="42" class="w-20 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white">
               </div>
               <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer pt-3">
-                <input type="checkbox" id="assign-dryrun" checked class="w-4 h-4 text-purple-600 rounded bg-slate-900 border-slate-700">
-                <span class="font-medium">Dry-Run Simulation Mode (Safe plan without live cart mutations)</span>
+                <input type="checkbox" id="assign-dryrun" class="w-4 h-4 text-purple-600 rounded bg-slate-900 border-slate-700">
+                <span class="font-medium text-amber-300">Dry-Run Simulation Mode (Leave unchecked for LIVE mutations)</span>
               </label>
             </div>
 
@@ -1381,6 +1381,9 @@ HTML_TEMPLATE = """
       window.parsedAccounts['assign'] = accs;
       switchTab('tab-assignment');
 
+      const dryCheck = document.getElementById('assign-dryrun');
+      if (dryCheck) dryCheck.checked = false;
+
       const pasteRadio = document.querySelector('input[name="assign-input-mode"][value="paste"]');
       if (pasteRadio) {
         pasteRadio.checked = true;
@@ -1579,6 +1582,8 @@ HTML_TEMPLATE = """
         return;
       }
       switchTab('tab-assignment');
+      const dryCheck = document.getElementById('assign-dryrun');
+      if (dryCheck) dryCheck.checked = false;
       const radio = document.querySelector('input[name="assign-input-mode"][value="paste"]');
       if (radio) {
         radio.checked = true;
@@ -1773,13 +1778,31 @@ HTML_TEMPLATE = """
         `;
         rep.results.forEach(res => {
           let badgeClass = 'bg-purple-950 text-purple-400 border border-purple-800';
-          if (res.status === 'SUCCESS' || res.status === 'SIMULATED_SUCCESS') badgeClass = 'bg-emerald-950 text-emerald-400 border border-emerald-800';
-          else if (res.status === 'FAILED') badgeClass = 'bg-rose-950 text-rose-400 border border-rose-800';
-          else if (res.status && res.status.includes('SKIPPED')) badgeClass = 'bg-amber-950 text-amber-300 border border-amber-800';
+          let statusText = res.status;
+          if (res.status === 'SUCCESS') {
+            badgeClass = 'bg-emerald-950 text-emerald-400 border border-emerald-800';
+            statusText = 'LIVE SUCCESS';
+          } else if (res.status === 'SIMULATED_SUCCESS') {
+            badgeClass = 'bg-blue-950 text-blue-300 border border-blue-800';
+            statusText = 'SIMULATED (DRY RUN)';
+          } else if (res.status === 'PARTIAL_SUCCESS') {
+            badgeClass = 'bg-amber-950 text-amber-300 border border-amber-800';
+            statusText = 'PARTIAL SUCCESS';
+          } else if (res.status === 'FAILED') {
+            badgeClass = 'bg-rose-950 text-rose-400 border border-rose-800';
+            statusText = 'FAILED';
+          } else if (res.status && res.status.includes('SKIPPED')) {
+            badgeClass = 'bg-amber-950 text-amber-300 border border-amber-800';
+          }
 
           let details = [];
           if (mode === 'cart_only' || mode === 'both') {
-            details.push(`${res.assigned_products_count} cart item(s)`);
+            if (res.status === 'SIMULATED_SUCCESS') {
+              details.push(`${res.assigned_products_count} cart item(s) simulated`);
+            } else {
+              const okCount = (res.added_products || []).filter(p => p.cart_success).length;
+              details.push(`${okCount}/${res.assigned_products_count} cart item(s) added`);
+            }
           }
           if (mode === 'address_only' || mode === 'both') {
             details.push(`Pincode: ${res.assigned_address_pincode || 'None'}`);
@@ -1795,7 +1818,7 @@ HTML_TEMPLATE = """
                   <span class="font-mono text-sm text-purple-400 font-semibold">${res.account_id}</span>
                   <span class="text-xs text-slate-400 ml-2">&bull; ${details.join(' &bull; ')}</span>
                 </div>
-                <span class="px-2 py-0.5 rounded text-xs ${badgeClass}">${res.status}</span>
+                <span class="px-2 py-0.5 rounded text-xs ${badgeClass}">${statusText}</span>
               </div>
               ${res.error ? `<div class="text-xs text-rose-400 mt-1 font-mono"><i class="fa-solid fa-circle-exclamation mr-1"></i>${res.error}</div>` : ''}
             </div>
@@ -2015,7 +2038,7 @@ def api_compare_pricing():
         else:
             pincodes = [p.strip() for p in pincodes_str.split(",") if p.strip()]
             if not pincodes:
-                pincodes = ["500092", "110025", "560001", "400001"]
+                pincodes = ["500081", "110025", "560001", "400001"]
             report = comparator.compare_product_pricing(product, pincodes=pincodes)
 
         elapsed = time.time() - start_time

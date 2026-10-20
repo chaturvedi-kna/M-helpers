@@ -305,17 +305,24 @@ class AssignmentExecutor:
                     continue
 
                 try:
+                    address_failures = []
                     # Execute address addition if assigned
                     if assignment.assigned_address:
                         print(f"[*] Account {acc_id}: Adding address at pincode {assignment.assigned_address.get('pin')}...", flush=True)
-                        addr_res = add_address(client, assignment.assigned_address)
-                        item_res["registered_address_id"] = addr_res.get("id")
-                        print(f"[+] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
+                        try:
+                            addr_res = add_address(client, assignment.assigned_address)
+                            item_res["registered_address_id"] = addr_res.get("id")
+                            print(f"[+] Account {acc_id}: Address registered (id={addr_res.get('id')})", flush=True)
+                        except Exception as ae:
+                            address_failures.append(f"Address: {ae}")
+                            item_res["registered_address_id"] = None
+                            print(f"[-] Account {acc_id}: Address addition failed: {ae}", flush=True)
                     else:
                         item_res["registered_address_id"] = None
 
                     # Execute product additions if assigned
                     added_prods = []
+                    cart_failures = []
                     if assignment.assigned_products:
                         for p in assignment.assigned_products:
                             p_id = p["product_id"]
@@ -335,18 +342,38 @@ class AssignmentExecutor:
                                     quantity=1,
                                     price_type=self.plan.config.get("price_type", PRICE_TYPE_BASIC)
                                 )
-                                cart_ok = bool(cart_res.get("success", True))
+                                cart_ok = bool(
+                                    cart_res.get("success") is True
+                                    or cart_res.get("cart_session")
+                                    or (cart_res.get("result", {}).get("total_quantity", 0) > 0)
+                                )
+                                if not cart_ok:
+                                    err_msg = cart_res.get("message") or cart_res.get("error") or "Cart addition rejected by Meesho API"
+                                    cart_failures.append(f"Product {p_id}: {err_msg}")
                             except Exception as pe:
                                 print(f"[-] Account {acc_id}: Product {p_id} cart addition warning: {pe}", flush=True)
                                 cart_ok = False
+                                cart_failures.append(f"Product {p_id}: {pe}")
 
                             added_prods.append({
                                 "product_id": p_id,
                                 "cart_success": cart_ok
                             })
                     item_res["added_products"] = added_prods
-                    item_res["status"] = "SUCCESS"
-                    print(f"[+] Account {acc_id}: Execution completed successfully!", flush=True)
+                    
+                    failures = address_failures + cart_failures
+                    if failures:
+                        has_successful_product = any(p.get("cart_success") for p in added_prods)
+                        has_successful_addr = item_res.get("registered_address_id") is not None
+                        if not has_successful_product and not has_successful_addr:
+                            item_res["status"] = "FAILED"
+                        else:
+                            item_res["status"] = "PARTIAL_SUCCESS"
+                        item_res["error"] = "; ".join(failures)
+                        print(f"[-] Account {acc_id}: Execution finished with warnings: {item_res['error']}", flush=True)
+                    else:
+                        item_res["status"] = "SUCCESS"
+                        print(f"[+] Account {acc_id}: Execution completed successfully!", flush=True)
 
                 except Exception as e:
                     logger.error(f"Error executing assignment for account {acc_id}: {e}")
@@ -376,14 +403,14 @@ DEFAULT_PRODUCTS = [
 
 DEFAULT_ADDRESSES = [
     {
-        "name": "K V Sharma",
-        "mobile": "9182777959",
-        "address_line_1": "Flat 204, Green Heights, Road No 2",
-        "address_line_2": "Shivapuri Colony Phase 2, Boduppal",
-        "landmark": "Near Rama Reddy Nagar",
+        "name": "Aarav Patel",
+        "mobile": "9876543210",
+        "address_line_1": "Plot No. 12, Cyber Gateway, HITEC City",
+        "address_line_2": "Madhapur",
+        "landmark": "Near Cyber Towers",
         "city": "Hyderabad",
         "state": "Telangana",
-        "pin": "500092",
+        "pin": "500081",
         "address_type": "Home"
     },
     {

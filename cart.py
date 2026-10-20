@@ -156,6 +156,23 @@ def add_product_to_cart(
     """
     Adds a specific product variation and supplier to cart.
     """
+    user_id = client.account_data.get("user_id")
+    if not user_id and client.account_data.get("xo"):
+        try:
+            from account_manager import parse_xo_token
+            meta = parse_xo_token(client.account_data.get("xo"))
+            if meta.user_id:
+                user_id = meta.user_id
+                client.account_data["user_id"] = user_id
+        except Exception:
+            pass
+
+    if user_id is not None:
+        try:
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            pass
+
     payload = {
         "context": "pdp",
         "identifier": "cart",
@@ -164,21 +181,21 @@ def add_product_to_cart(
         "items": [
             {
                 "identifier": "cart",
-                "product_id": product_id,
-                "supplier_id": supplier_id,
-                "variation_id": variation_id,
+                "product_id": int(product_id),
+                "supplier_id": int(supplier_id),
+                "variation_id": int(variation_id),
                 "variation": variation_name,
-                "quantity": quantity,
-                "selected_price_type_id": price_type,
+                "quantity": int(quantity),
+                "selected_price_type_id": price_type or PRICE_TYPE_BASIC,
                 "client_metadata": None
             }
         ],
         "address_id": None,
-        "user_id": client.account_data.get("user_id")
+        "user_id": user_id
     }
 
     res = client.api_call("POST", "/api/1.0/cart/add", payload=payload)
-    if res.get("success"):
+    if res and res.get("success"):
         client.cart_session = res.get("cart_session")
         client.log(f"[Cart] Added product {product_id} ({variation_name}) to cart. Session updated.")
     return res
@@ -238,6 +255,23 @@ def add_random_products_to_cart(
 
 def view_cart(client: MeeshoClient) -> Dict[str, Any]:
     """Fetches full cart details and breakdown from /api/9.0/cart."""
+    user_id = client.account_data.get("user_id")
+    if not user_id and client.account_data.get("xo"):
+        try:
+            from account_manager import parse_xo_token
+            meta = parse_xo_token(client.account_data.get("xo"))
+            if meta.user_id:
+                user_id = meta.user_id
+                client.account_data["user_id"] = user_id
+        except Exception:
+            pass
+
+    if user_id is not None:
+        try:
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            pass
+
     payload = {
         "context": "review",
         "identifier": "cart",
@@ -254,7 +288,7 @@ def view_cart(client: MeeshoClient) -> Dict[str, Any]:
         "is_self_pickup": None,
         "self_pickup_address": None,
         "is_emi": None,
-        "user_id": client.account_data.get("user_id")
+        "user_id": user_id
     }
     return client.api_call("POST", "/api/9.0/cart", payload=payload)
 

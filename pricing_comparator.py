@@ -54,7 +54,7 @@ ALL_INDIA_PINCODES = [
 
     # Zone 5: South (AP, Telangana, Karnataka)
     {"pin": "500001", "city": "Hyderabad", "state": "Telangana", "zone": "Zone 5 (South)"},
-    {"pin": "500092", "city": "Hyderabad", "state": "Telangana", "zone": "Zone 5 (South)"},
+    {"pin": "500081", "city": "Hyderabad", "state": "Telangana", "zone": "Zone 5 (South)"},
     {"pin": "520001", "city": "Vijayawada", "state": "Andhra Pradesh", "zone": "Zone 5 (South)"},
     {"pin": "530001", "city": "Visakhapatnam", "state": "Andhra Pradesh", "zone": "Zone 5 (South)"},
     {"pin": "560001", "city": "Bangalore", "state": "Karnataka", "zone": "Zone 5 (South)"},

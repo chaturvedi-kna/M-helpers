@@ -63,8 +63,9 @@ def build_meesho_headers(account_data: Dict[str, Any]) -> Dict[str, str]:
     shield_id = account_data.get("shield_session_id") or identity.get("shield_session_id") or DEFAULT_SHIELD_SESSION_ID
     xo = str(account_data.get("xo") or "")
 
-    # Align instance_id with embedded instance_id in XO token JWT payload
+    # Align instance_id and user_id with embedded claims in XO token JWT payload
     jwt_instance_id = None
+    jwt_user_id = None
     if xo:
         try:
             parts = xo.split(".")
@@ -79,12 +80,20 @@ def build_meesho_headers(account_data: Dict[str, Any]) -> Dict[str, str]:
                     try:
                         jwt_payload = json.loads(raw_payload)
                         jwt_instance_id = jwt_payload.get("https://meesho.com/instance_id")
+                        jwt_user_id = jwt_payload.get("https://meesho.com/user_id")
                     except Exception:
                         match = re.search(r'"https://meesho\.com/instance_id"\s*:\s*"([^"]+)"', raw_payload)
                         if match:
                             jwt_instance_id = match.group(1)
+                        uid_match = re.search(r'"https://meesho\.com/user_id"\s*:\s*"?(\d+)"?', raw_payload)
+                        if uid_match:
+                            jwt_user_id = uid_match.group(1)
         except Exception:
             pass
+
+    if not user_id and jwt_user_id:
+        user_id = str(jwt_user_id)
+        account_data["user_id"] = user_id
 
     instance_id = jwt_instance_id or str(account_data.get("instance_id") or identity.get("instance_id") or uuid.uuid4().hex)
     app_session_id = str(identity.get("app_session_id") or uuid.uuid4().hex)
