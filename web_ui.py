@@ -2241,10 +2241,13 @@ def api_live_fod():
         req = request.json or {}
         account_data = req.get("account_data")
     
-    if account_data and is_blacklisted_account(account_data, "live_fod"):
+    if not account_data or not isinstance(account_data, dict):
+        return jsonify({"error": "Account JSON credentials are required for FOD classification"}), 400
+
+    if is_blacklisted_account(account_data, "live_fod"):
         return jsonify({"error": "Unauthorized account"}), 403
 
-    user_ident = str(account_data.get("mobile") or account_data.get("user_id") or "anonymous") if account_data else "anonymous"
+    user_ident = str(account_data.get("mobile") or account_data.get("user_id") or "account")
     print(f"[*] /api/live-fod: Querying live Meesho FOD for {user_ident}", flush=True)
 
     try:

@@ -424,12 +424,17 @@ class ProductPricingComparator:
         live_prepaid_discount = live_quote.get("prepaid_discount") or 0.0
         discount_source = live_quote.get("discount_source", "none")
 
-        if live_account_discount > 0:
+        max_fod_cap = round(base_price * 0.585, 2)
+        capped_fod = min(base_price, fod_discount, max_fod_cap) if fod_discount > 0 else 0.0
+
+        if live_account_discount >= capped_fod and live_account_discount > 0:
             applied_account_discount = live_account_discount
-        elif fod_discount > 0:
-            max_fod_cap = round(base_price * 0.585, 2)
-            applied_account_discount = min(base_price, fod_discount, max_fod_cap)
-            discount_source = "advertised_tier_fallback"
+        elif capped_fod > 0:
+            # Ensure full FOD discount applies even when cart quote only has minor supplier discount
+            applied_account_discount = max(live_account_discount, capped_fod)
+            discount_source = "meesho_live_quote+fod" if live_account_discount > 0 else "authenticated_fod_tier"
+        elif live_account_discount > 0:
+            applied_account_discount = live_account_discount
         else:
             applied_account_discount = 0.0
 

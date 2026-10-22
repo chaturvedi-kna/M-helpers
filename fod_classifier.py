@@ -202,11 +202,23 @@ def extract_fod_from_record(data: Dict[str, Any]) -> Tuple[Optional[str], Option
                     return raw_text, amount, status, rationale
 
     # Source 4: root-level keys
-    for k in ("fod_tier", "fod_text", "offer_text"):
-        if k in data and isinstance(data[k], str):
-            raw_text = data[k]
-            amount = normalize_discount_amount(raw_text)
+    for k in ("advertised_tier", "fod_tier", "fod_text", "offer_text"):
+        if k in data and data[k]:
+            raw_text = str(data[k])
+            amount = data.get("advertised_amount") or normalize_discount_amount(raw_text)
+            if amount is not None:
+                try:
+                    amount = int(amount)
+                except (ValueError, TypeError):
+                    amount = normalize_discount_amount(str(amount))
             return raw_text, amount, status, rationale
+
+    if "advertised_amount" in data and data["advertised_amount"] is not None:
+        try:
+            amount = int(data["advertised_amount"])
+            return f"₹{amount} OFF", amount, status, rationale
+        except (ValueError, TypeError):
+            pass
 
     # Source 5: user_meta first order indicator
     user_meta = data.get("user_meta") or {}
@@ -368,8 +380,10 @@ def fetch_live_fod(
 ) -> FODRecord:
     """
     Fetches the active, real-time First Order Discount (FOD) directly from Meesho APIs.
-    Calls /api/1.0/anonymous/fod-personalisation (and /api/3.0/offers/list if authenticated),
-    ensuring live daily promotional tiers are captured rather than relying on static JSON files.
+    Strictly authenticated: Requires account JSON credentials (xo or ox + user_id/mobile).
+    Queries POST /api/1.0/fod-personalisation with logged_in context, ensuring
+    the actual user-level promotional tier (e.g. ₹170) is captured. Auto-refreshes xo if expired.
+    Unauthenticated/guest requests are completely disallowed as account JSON is mandatory.
     """
     import uuid
     import requests
@@ -380,70 +394,196 @@ def fetch_live_fod(
 
     # Build device identity
     acc = account_data or (client.account_data if client else {})
+    if not acc or not isinstance(acc, dict):
+        return FODRecord(
+            source_reference=f"{base_url}/api/1.0/fod-personalisation",
+            account_id=None,
+            mobile=None,
+            advertised_tier="unclassified",
+            advertised_amount=None,
+            raw_offer_text=None,
+            eligibility_status=EligibilityStatus.INELIGIBLE,
+            eligibility_reason="Missing mandatory account JSON data. Authenticated account JSON is required.",
+            validation_errors=["Missing mandatory account JSON data."],
+            raw_data=acc or {}
+        )
+
     identity = acc.get("identity") or {}
 
     instance_id = str(acc.get("instance_id") or identity.get("instance_id") or uuid.uuid4().hex)
     gaid = str(acc.get("gaid") or identity.get("gaid") or uuid.uuid4())
     auth = str(acc.get("authorization") or identity.get("authorization") or DEFAULT_AUTHORIZATION)
-    xo = str(acc.get("xo") or "")
-
-    # Build headers - Meesho /api/1.0/anonymous/fod-personalisation strictly requires anonymous context
-    anon_xo = identity.get("anon_xo") or acc.get("anon_xo")
-    if not anon_xo:
-        anon_xo = "eyJ0eXBlIjoiY29tcG9zaXRlIn0=.eyJqd3QiOiJleUpoYkdjaU9pSklVekkxTmlJc0ltaDBkSEJ6T2k4dmJXVmxjMmh2TG1OdmJTOXBjMjlmWTI5MWJuUnllVjlqYjJSbElqb2lTVTRpTENKb2RIUndjem92TDIxbFpYTm9ieTVqYjIwdmRtVnljMmx2YmlJNklqRWlMQ0owZVhBaU9pSktWMVFpZlEuZXlKbGVIQWlPakU1TkRrek5ERTJNek1zSW1oMGRIQnpPaTh2YldWbGMyaHZMbU52YlM5aGJtOXVlVzF2ZFhOZmRYTmxjbDlwWkNJNkltWXdPRFk1WXpZeExUUTJaRGt0TkROak1DMWlOek0xTFdZeFpESm1aREF4WlRReU15SXNJbWgwZEhCek9pOHZiV1ZsYzJodkxtTnZiUzlwYm5OMFlXNWpaVjlwWkNJNklqSXdZVFF5T1dFNVl6VmxOalF4T1dWaE1EQmlOekk0T0RrM01XSm1PVEkySWl3aWFXRjBJam94TnpreE5qWXhOak16ZlEueDB6ZDZDT0pkVU1tTk5XeFVib2RKcHMyNUJ5cDZFcXVKSTNaTVBpbkpoQSIsInhvIjoiIn0="
+    app_session_id = str(identity.get("app_session_id") or "d3515637-9831-45a7-9a7e-ebec00c46d0d")
 
     user_id = str(acc.get("user_id") or "")
+    mobile = str(acc.get("mobile") or acc.get("phone") or "")
+    xo = str(acc.get("xo") or "")
+    ox = str(acc.get("ox") or "")
 
-    headers = {
+    # Extract user_id from xo JWT token if missing at root
+    if not user_id and xo:
+        try:
+            import base64
+            import re
+            parts = xo.split(".")
+            if len(parts) >= 2:
+                pad = parts[1] + "=" * (-len(parts[1]) % 4)
+                outer = json.loads(base64.urlsafe_b64decode(pad.encode()))
+                jwt_str = outer.get("jwt", "")
+                if "." in jwt_str:
+                    jwt_p = jwt_str.split(".")[1]
+                    jwt_pad = jwt_p + "=" * (-len(jwt_p) % 4)
+                    raw_payload = base64.urlsafe_b64decode(jwt_pad.encode()).decode("utf-8", errors="replace")
+                    try:
+                        jwt_payload = json.loads(raw_payload)
+                        user_id = str(jwt_payload.get("https://meesho.com/user_id") or "")
+                    except Exception:
+                        uid_match = re.search(r'"https://meesho\.com/user_id"\s*:\s*"?(\d+)"?', raw_payload)
+                        if uid_match:
+                            user_id = uid_match.group(1)
+                    if user_id:
+                        acc["user_id"] = user_id
+        except Exception:
+            pass
+
+    # Strictly require authentication credentials
+    if not xo and not ox:
+        return FODRecord(
+            source_reference=f"{base_url}/api/1.0/fod-personalisation",
+            account_id=user_id or None,
+            mobile=mobile or None,
+            advertised_tier="unclassified",
+            advertised_amount=None,
+            raw_offer_text=None,
+            eligibility_status=EligibilityStatus.INELIGIBLE,
+            eligibility_reason="Missing mandatory authentication credentials ('xo' or 'ox'). Account JSON is required.",
+            validation_errors=["Missing mandatory authentication credentials ('xo' or 'ox'). Account JSON is required."],
+            raw_data=acc
+        )
+
+    # Proactively refresh xo if authenticated and token is expired or missing
+    if ox:
+        try:
+            from account_manager import is_token_expired, DirectApiTokenRefreshProvider
+            if not xo or is_token_expired(acc, buffer_seconds=60):
+                prov = DirectApiTokenRefreshProvider(api_host=base_url)
+                refreshed = prov.refresh(acc)
+                if refreshed and refreshed.get("xo"):
+                    xo = refreshed["xo"]
+                    acc["xo"] = xo
+                    if client:
+                        client.account_data["xo"] = xo
+                        client.update_headers()
+        except Exception as ref_err:
+            logger.debug(f"Proactive refresh note before live FOD fetch: {ref_err}")
+
+    if not xo:
+        return FODRecord(
+            source_reference=f"{base_url}/api/1.0/fod-personalisation",
+            account_id=user_id or None,
+            mobile=mobile or None,
+            advertised_tier="unclassified",
+            advertised_amount=None,
+            raw_offer_text=None,
+            eligibility_status=EligibilityStatus.INELIGIBLE,
+            eligibility_reason="Could not obtain a valid 'xo' token via auto-refresh. Account login session expired.",
+            validation_errors=["Could not obtain a valid 'xo' token via auto-refresh."],
+            raw_data=acc
+        )
+
+    # Standard body: pass empty offer_bucket so Meesho dynamically evaluates the true real-time tier
+    body = {
+        "offer_bucket": "",
+        "from_language_modal": False
+    }
+
+    sess = client.session if client else requests.Session()
+    acc_key = user_id or mobile
+
+    target_endpoint = f"{base_url}/api/1.0/fod-personalisation"
+    auth_headers = {
         "Authorization": auth,
-        "App-Version": str(acc.get("app_version", "29.6")),
-        "App-Version-Code": str(acc.get("app_version_code", "870")),
+        "App-Version": str(acc.get("app_version", APP_VERSION)),
+        "App-Version-Code": str(acc.get("app_version_code", APP_VERSION_CODE)),
         "Instance-Id": instance_id,
         "App-Gaid": gaid,
         "App-Session-Count": "1",
         "Country-Iso": "in",
         "Application-Id": "com.meesho.supply",
-        "App-Session-Id": str(identity.get("app_session_id") or "d3515637-9831-45a7-9a7e-ebec00c46d0d"),
-        "App-Sdk-Version": "34",
+        "App-Session-Id": app_session_id,
+        "App-Sdk-Version": str(acc.get("app_sdk_version", APP_SDK_VERSION)),
         "App-Client-Id": "android",
-        "Xo": anon_xo,
-        "Meesho-User-Context": "anonymous",
+        "Xo": xo,
+        "Meesho-User-Context": "logged_in",
         "Accept": "application/json",
         "Content-Type": "application/json; charset=UTF-8",
         "User-Agent": "okhttp/4.9.0"
     }
+    if user_id:
+        auth_headers["App-User-Id"] = user_id
 
-    # Respect account existing offer_bucket if present, else omit to let Meesho dynamically personalize
-    existing_bucket = str(acc.get("offer_bucket") or acc.get("bucket") or "").strip()
-    body = {
-        "from_language_modal": True
-    }
-    if existing_bucket:
-        body["offer_bucket"] = existing_bucket
-
-    sess = client.session if client else requests.Session()
-    endpoint = f"{base_url}/api/1.0/anonymous/fod-personalisation"
-    acc_key = user_id or str(acc.get("mobile") or "")
-
+    live_payload = None
     try:
         r = proxy_manager.request_with_retry(
             session=sess,
             method="POST",
-            url=endpoint,
+            url=target_endpoint,
             account_key=acc_key or None,
-            headers=headers,
+            headers=auth_headers,
             json=body,
             timeout=15,
             custom_proxy=custom_proxy or (client.custom_proxy if client else None)
         )
-        r.raise_for_status()
-        live_payload = r.json()
+
+        # Handle 401 token expiry retry
+        if r.status_code == 401 and ox:
+            logger.info(f"FOD returned 401 on {target_endpoint}, attempting refresh via /api/2.0/xo...")
+            try:
+                from account_manager import DirectApiTokenRefreshProvider
+                prov = DirectApiTokenRefreshProvider(api_host=base_url)
+                refreshed = prov.refresh(acc)
+                if refreshed and refreshed.get("xo"):
+                    xo = refreshed["xo"]
+                    acc["xo"] = xo
+                    auth_headers["Xo"] = xo
+                    if client:
+                        client.account_data["xo"] = xo
+                        client.update_headers()
+                    r = proxy_manager.request_with_retry(
+                        session=sess,
+                        method="POST",
+                        url=target_endpoint,
+                        account_key=acc_key or None,
+                        headers=auth_headers,
+                        json=body,
+                        timeout=15,
+                        custom_proxy=custom_proxy or (client.custom_proxy if client else None)
+                    )
+            except Exception as ref_retry_err:
+                logger.debug(f"Retry refresh after 401 failed: {ref_retry_err}")
+
+        if r.status_code == 200:
+            live_payload = r.json()
+        else:
+            logger.warning(f"Authenticated FOD query {target_endpoint} returned {r.status_code}: {r.text[:200]}")
+            return FODRecord(
+                source_reference=target_endpoint,
+                account_id=user_id or None,
+                mobile=mobile or None,
+                advertised_tier="unclassified",
+                advertised_amount=None,
+                raw_offer_text=None,
+                eligibility_status=EligibilityStatus.INELIGIBLE,
+                eligibility_reason=f"Meesho API returned HTTP {r.status_code}: {r.text[:200]}",
+                validation_errors=[f"HTTP {r.status_code} from {target_endpoint}"],
+                raw_data=acc
+            )
     except Exception as e:
-        logger.error(f"Live FOD fetch from {endpoint} failed: {e}")
+        logger.error(f"Authenticated FOD fetch from {target_endpoint} failed: {e}")
         return FODRecord(
-            source_reference=endpoint,
-            account_id=str(acc.get("user_id") or ""),
-            mobile=str(acc.get("mobile") or ""),
+            source_reference=target_endpoint,
+            account_id=user_id or None,
+            mobile=mobile or None,
             advertised_tier="unclassified",
             advertised_amount=None,
             raw_offer_text=None,
@@ -456,11 +596,19 @@ def fetch_live_fod(
     # Classify the live response
     record = classify_single_fod_record(
         live_payload,
-        source_reference=f"{endpoint} (LIVE)"
+        source_reference=f"{target_endpoint} (LIVE)"
     )
-    record.account_id = str(acc.get("user_id") or "") or None
-    record.mobile = str(acc.get("mobile") or "") or None
+    record.account_id = user_id or None
+    record.mobile = mobile or None
     record.raw_data = acc
+
+    # Sync resolved live tier and offer_bucket into the account dictionary
+    if record.advertised_tier and record.advertised_tier != "unclassified":
+        acc["advertised_tier"] = record.advertised_tier
+        acc["advertised_amount"] = record.advertised_amount
+        if record.offer_bucket:
+            acc["offer_bucket"] = record.offer_bucket
+
     return record
 
 

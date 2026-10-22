@@ -129,6 +129,71 @@ class TestFODClassifier(unittest.TestCase):
             self.assertTrue((out_dir / "fod_tier_190.json").is_file())
             self.assertTrue((out_dir / "fod_summary.json").is_file())
 
+    def test_classify_advertised_root_keys(self):
+        record = {
+            "user_id": 3001,
+            "mobile": "6399916141",
+            "advertised_tier": "tier_170",
+            "advertised_amount": 170,
+            "offer_bucket": "170"
+        }
+        res = classify_single_fod_record(record)
+        self.assertEqual(res.advertised_tier, "tier_170")
+        self.assertEqual(res.advertised_amount, 170)
+        self.assertEqual(res.offer_bucket, "170")
+
+    def test_fetch_live_fod_authenticated_only(self):
+        from unittest.mock import patch, MagicMock
+        from fod_classifier import fetch_live_fod
+
+        # 1. Authenticated account
+        acc_auth = {
+            "user_id": 605592597,
+            "mobile": "6399916141",
+            "xo": "valid_xo_token",
+            "identity": {"app_session_id": "sess_1", "instance_id": "inst_1", "gaid": "gaid_1"}
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "surgical_first_order_discount_v3": {
+                "enabled": True,
+                "offer_bucket": 170,
+                "offer": {
+                    "max_offer_value": 170,
+                    "offer_text": "₹170 OFF"
+                }
+            }
+        }
+
+        with patch("proxy_manager.request_with_retry", return_value=mock_resp) as mock_req:
+            rec = fetch_live_fod(account_data=acc_auth)
+            # Verify it hit the authenticated /api/1.0/fod-personalisation endpoint
+            called_url = mock_req.call_args[1].get("url") or mock_req.call_args[0][2]
+            called_headers = mock_req.call_args[1].get("headers")
+            self.assertIn("/api/1.0/fod-personalisation", called_url)
+            self.assertNotIn("/anonymous/", called_url)
+            self.assertEqual(called_headers.get("Meesho-User-Context"), "logged_in")
+            self.assertEqual(called_headers.get("Xo"), "valid_xo_token")
+            self.assertEqual(rec.advertised_tier, "tier_170")
+            self.assertEqual(rec.advertised_amount, 170)
+            self.assertEqual(rec.offer_bucket, "170")
+            self.assertEqual(acc_auth.get("advertised_tier"), "tier_170")
+
+        # 2. Account without mandatory credentials (must be rejected, never calls anonymous)
+        acc_no_cred = {
+            "identity": {"app_session_id": "sess_2"}
+        }
+
+        with patch("proxy_manager.request_with_retry") as mock_req:
+            rec = fetch_live_fod(account_data=acc_no_cred)
+            # Ensure no API request was dispatched without credentials
+            mock_req.assert_not_called()
+            self.assertEqual(rec.advertised_tier, "unclassified")
+            self.assertEqual(rec.eligibility_status, EligibilityStatus.INELIGIBLE)
+            self.assertTrue(any("mandatory" in err.lower() for err in rec.validation_errors))
+
 
 if __name__ == "__main__":
     unittest.main()
